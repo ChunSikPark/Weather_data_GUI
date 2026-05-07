@@ -1,0 +1,158 @@
+# Team Overbye Weather Data Portal — CLAUDE.md
+
+Project context for AI agents working on this repo. Read this before touching code.
+
+## What this is
+
+A weather data download portal for Texas A&M Team Overbye research. Users browse and download weather datasets (ERA5, HRRR, NOAA/GFS) that live as files in Google Drive folders. The backend exposes a catalog/download API; the frontend is a static site.
+
+- **Backend**: FastAPI (Python), deployed on Railway → `https://weatherdatagui-production.up.railway.app`
+- **Frontend**: Static HTML/JS/CSS, deployed on Cloudflare Pages → `https://weather-data-gui.pages.dev`
+- **Data**: Google Drive (service account, read-only)
+- **SDK**: `TeamOverbyeWeather` Python package on PyPI (in `package/`)
+- **Repo**: https://github.com/ChunSikPark/Weather_data_GUI
+
+## Architecture
+
+```
+frontend/ (Cloudflare Pages)
+  ├ index.html       Step 1/2/3 picker UI
+  ├ main.js          State, API calls, render functions
+  └ styles.css       "Scientific Dark" aesthetic (Bencium-inspired)
+
+backend/ (Railway, Docker)
+  ├ main.py          FastAPI app, endpoints
+  ├ catalog.py       Drive scanning, regex matching, 30-min cache
+  ├ download.py      ZIP bundling, source key lookup
+  └ status.py        Pipeline health
+
+package/TeamOverbyeWeather/  Python SDK (pip install TeamOverbyeWeather)
+```
+
+## Critical: Google Drive folder IDs
+
+These IDs are **hardcoded directly in `_build_noaa()`** because Railway has stale `GDRIVE_NOAA_FOLDER_ID` env vars that point to wrong folders. Do not "refactor" them back to env-var lookup unless you also clear the env vars on Railway.
+
+| Source | Folder ID | Naming convention |
+|---|---|---|
+| ERA5 quarterly | `12U8PNHHGIxCy8_GRzsF2KxZ4GneMWy6h` | quarter-tagged ZIPs |
+| ERA5 history zip | `1O8VjwFKXCJ3DR56_UEep-rXyb7OHNGMZ` | quarter-tagged ZIPs |
+| ERA5 archive | `1PD_y38k6x8HjDR8Wv-15NsZ6pdZ9pVPz` | quarter-tagged ZIPs |
+| HRRR forecast | `1yuEH5020Nh-Km5_PvYfmVpWTQIhzI1Iz` | `YYYY-MM-DDTHHZ_sfc_48_CONUS.zip` |
+| HRRR history (current year, daily) | `1Uc-tuSPEnh7rJzC3nFvxndFvULrsNe-U` | `CONUS_YYYY_MM_DD.zip` (or `.pww.gz`) |
+| HRRR history (archive, monthly) | `1_govjuY2WV0TqHp_7PwVVtrGPCDU-I9v` | `CONUSYYYY_MM.zip` or `CONUSYYYY_MM.pww.gz` |
+| NOAA recent | `1kAOe-dGHByzZHijHGo8rmL7x4KY6OMav` | `Forecast_NorthAmerica_RunYYYY-MM-DDTHHZ.pww` |
+| NOAA archive | `1TTa-bDV88sSf4strSW649UHPRddMHJtr` | same as above |
+
+The service account email from `service_account.json`'s `client_email` field MUST be granted Viewer access on every folder above.
+
+## Catalog structure (returned by `GET /api/catalog`)
+
+```json
+{
+  "era5_na":               { "quarters": [...], "file_ids": {...} },
+  "era5_tx":               { "quarters": [...], "file_ids": {...} },
+  "hrrr_forecast":         { "cycles":   [...], "file_ids": {...} },
+  "hrrr_history":          { "months":   [...], "file_ids": {...} },  // legacy combined
+  "hrrr_history_current":  { "days":     [...], "file_ids": {...} },  // YYYY-MM-DD keys
+  "hrrr_history_archive":  { "months":   [...], "file_ids": {...} },  // YYYY-MM keys
+  "noaa_forecast":         { "cycles":   [...], "file_ids": {...} },  // legacy combined
+  "noaa_forecast_recent":  { "cycles":   [...], "file_ids": {...} },  // from main folder
+  "noaa_forecast_archive": { "cycles":   [...], "file_ids": {...} }   // from archive folder
+}
+```
+
+Date key formats:
+- ERA5: `YYYY-Qn` (e.g. `2025-Q1`)
+- HRRR/NOAA forecast cycles: `YYYY-MM-DDTHHZ`
+- HRRR archive months: `YYYY-MM`
+- HRRR current days: `YYYY-MM-DD`
+
+## Frontend flow (Step 1 → 2 → 3)
+
+1. **Step 1 — Source**: ERA5 / HRRR / NOAA cards.
+2. **Step 2 — Type**: per-source sub-types defined in `TYPE_DEFS` in `main.js`:
+   - ERA5: `historical`
+   - HRRR: `current` | `archive` | `forecast`
+   - NOAA: `recent` | `archive`
+3. **Step 3 — Dates**: picker is selected by `renderStep3()` based on (source, type):
+   - `renderQuarterPicker()` — ERA5 (with From/To range selector)
+   - `renderMonthPicker(catalogKey)` — HRRR archive months
+   - `renderDayPicker(catalogKey)` — HRRR current year days
+   - `renderCyclePicker(catalogKey)` — HRRR forecast / NOAA cycles
+
+`getApiSourceKey()` in `main.js` maps (source, type) → catalog/download API source string. Keep this in sync with `_SOURCE_LOOKUP` in `download.py`.
+
+## Endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/health` | health check |
+| GET | `/api/status` | pipeline status |
+| GET | `/api/catalog` | full catalog (cached 30 min) |
+| GET | `/api/catalog/refresh` | force rebuild (browser-friendly) |
+| POST | `/api/catalog/refresh` | force rebuild |
+| GET | `/api/download?source=...&dates=...` | single = 302 to Drive; multi = ZIP stream |
+| GET | `/api/debug/folders` | resolved folder IDs the catalog is using |
+| GET | `/api/debug/folder?folder_id=...&limit=N` | raw filenames in a Drive folder |
+
+The two debug endpoints are gold for diagnosing "data not showing" issues — always use them before guessing.
+
+## Painful lessons (read these before debugging)
+
+1. **Service account credentials**: Production reads from `GDRIVE_CREDENTIALS_JSON_CONTENT` env var (the entire JSON as a string). Local dev uses `/app/credentials/service_account.json`. PyDrive2 OAuth tokens are NOT service account JSONs — easy mistake.
+
+2. **Railway env vars override defaults**: `_folder_id(env_key, default_key)` reads env vars first. Railway has at least one stale folder-ID env var (`GDRIVE_NOAA_FOLDER_ID = 1wICJMuO0MRopG3hpPFt7MzFmx5M33v4R` — old wrong NOAA folder). NOAA folder IDs are now hardcoded in `_build_noaa()` to dodge this. If you need to change them, edit the constants directly.
+
+3. **Drive folders can have subfolders**: `list_files()` recurses up to 4 levels deep. If you see "folder has files but catalog is empty", check the regex first, then check folder access.
+
+4. **Filename conventions vary wildly between folders**:
+   - HRRR forecast: `2026-05-07T12Z_sfc_48_CONUS.zip` (date-prefix)
+   - HRRR history daily: `CONUS_2026_05_06.zip` (CONUS-prefix, underscores)
+   - HRRR history monthly: `CONUS2026_04.zip` (no underscore between CONUS and year) — also `.pww.gz` for older years
+   - NOAA: `Forecast_NorthAmerica_RunYYYY-MM-DDTHHZ.pww`
+   - **Always run `/api/debug/folder` to see actual filenames** before writing/changing a regex.
+
+5. **HRRR history regex is intentionally loose** on extension: `[A-Za-z0-9.]+$` matches `.zip`, `.pww.gz`, `.pww`, `.gz`. Don't tighten it to `\.zip$` — older archives are `.pww.gz`.
+
+6. **NOAA "Recent" vs "Archive" is folder-based, not date-based**. Earlier attempts at date-based splitting all failed because the dataset's "newness" doesn't match wall-clock time. Each tab pulls strictly from its own folder.
+
+7. **Cache TTL is 30 minutes**. Use `GET /api/catalog/refresh` to force a rebuild after deployment or after sharing a new folder with the service account.
+
+## Deployment
+
+- **Backend (Railway)**: auto-deploys on push to `main`. Takes ~90s. Verify with `curl /api/health` then `curl /api/debug/folders`.
+- **Frontend (Cloudflare Pages)**: auto-deploys on push to `main`. Build output dir = `frontend`. No build step.
+- **Env vars on Railway** (current): `GDRIVE_CREDENTIALS_JSON_CONTENT`, `CORS_ORIGINS=https://weather-data-gui.pages.dev`. NOAA folder env vars are stale; ignore them.
+
+## Frontend extras worth knowing
+
+- ERA5 has a **From/To range selector** above the quarter grid — pick a start, pick an end, click "Select Range" and every available quarter in between gets highlighted.
+- HRRR Current Year picker shows individual **days** (not months), because the daily folder has individual day ZIPs.
+- "Pipelines" status dots in the header poll `/api/status` every 5 minutes.
+- Multi-file downloads are bundled as a streaming ZIP (`ZIP_STORED`, no recompression).
+
+## Common workflows
+
+**"NOAA shows no data"**
+1. `curl /api/debug/folders` — confirm the folder ID being used
+2. `curl /api/debug/folder?folder_id=<that_id>` — confirm files exist + see filenames
+3. If folder ID is wrong but files exist: env var override → hardcode it in `_build_noaa()`
+4. If folder is empty: ask user for the right folder ID
+5. If folder has files but they don't match regex: check filename pattern, fix `_RE_NOAA`
+
+**"HRRR shows no data"**
+1. Same as above with `_build_hrrr_history()` and `_RE_HRRR_HISTORY_DAY` / `_RE_HRRR_HISTORY_MONTH`
+2. Daily folder uses `CONUS_YYYY_MM_DD.*`, monthly uses `CONUSYYYY_MM.*` — different regexes
+
+**"Adding a new data source"**
+1. Add folder ID to `_DEFAULT_FOLDERS` in `catalog.py`
+2. Add a `_build_<source>()` function and call it from `build_catalog()`
+3. Add the new key to `_empty_catalog()`
+4. Add `_SOURCE_LOOKUP` + `_FILENAME_PATTERNS` entries in `download.py`
+5. Add `TYPE_DEFS` entry in `main.js`, update `getApiSourceKey()` and `renderStep3()`
+6. Update `API_DOCS.md`
+
+## Tone note
+
+The user is a researcher, not a developer. Respond directly to what's asked, don't over-explain. If something isn't working, USE THE DEBUG ENDPOINTS before guessing — guessing wastes their time and patience.
