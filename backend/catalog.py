@@ -262,6 +262,7 @@ def _build_era5(client: DriveClient) -> dict[str, dict[str, Any]]:
     folders = [
         _folder_id("GDRIVE_ERA5_QUARTERLY_FOLDER_ID", "era5_quarterly"),
         _folder_id("GDRIVE_ERA5_HISTORY_ZIP_FOLDER_ID", "era5_history_zip"),
+        _folder_id("GDRIVE_ERA5_ARCHIVE_FOLDER_ID", "era5_archive"),
     ]
 
     na: dict[str, dict[str, Any]] = {}
