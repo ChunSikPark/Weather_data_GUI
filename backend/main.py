@@ -92,6 +92,22 @@ async def get_catalog_refresh() -> JSONResponse:
     return JSONResponse(data)
 
 
+@app.get("/api/debug/folders")
+async def debug_folders() -> JSONResponse:
+    """Return the folder IDs the catalog is actually using (env-overridden or default)."""
+    folders = {
+        "noaa_main":            catalog_module._folder_id("GDRIVE_NOAA_FOLDER_ID", "noaa_main"),
+        "noaa_archive":         catalog_module._folder_id("GDRIVE_NOAA_ARCHIVE_FOLDER_ID", "noaa_archive"),
+        "hrrr_forecast":        catalog_module._folder_id("GDRIVE_HRRR_FORECAST_FOLDER_ID", "hrrr_forecast"),
+        "hrrr_history_main":    catalog_module._folder_id("GDRIVE_HRRR_HISTORY_FOLDER_ID", "hrrr_history_main"),
+        "hrrr_history_archive": catalog_module._folder_id("GDRIVE_HRRR_HISTORY_ARCHIVE_FOLDER_ID", "hrrr_history_archive"),
+        "era5_quarterly":       catalog_module._folder_id("GDRIVE_ERA5_QUARTERLY_FOLDER_ID", "era5_quarterly"),
+        "era5_history_zip":     catalog_module._folder_id("GDRIVE_ERA5_HISTORY_ZIP_FOLDER_ID", "era5_history_zip"),
+        "era5_archive":         catalog_module._folder_id("GDRIVE_ERA5_ARCHIVE_FOLDER_ID", "era5_archive"),
+    }
+    return JSONResponse(folders)
+
+
 @app.get("/api/debug/folder")
 async def debug_folder(
     folder_id: str = Query(..., description="Drive folder ID to inspect"),
