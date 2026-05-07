@@ -52,8 +52,8 @@ def _credentials_path() -> str:
 # ---------------------------------------------------------------------------
 
 _RE_HRRR_FORECAST = re.compile(r"(\d{4}-\d{2}-\d{2})T(\d{2})Z_sfc_48_CONUS\.zip$", re.IGNORECASE)
-_RE_HRRR_HISTORY_MONTH = re.compile(r"^(\d{4}-\d{2})_sfc_01_CONUS\.zip$", re.IGNORECASE)
-_RE_HRRR_HISTORY_DAY = re.compile(r"^(\d{4}-\d{2}-\d{2})_sfc_01_CONUS(?:\.pww)?\.zip$", re.IGNORECASE)
+_RE_HRRR_HISTORY_MONTH = re.compile(r"^(\d{4}-\d{2})_sfc_\d+_CONUS.*\.zip$", re.IGNORECASE)
+_RE_HRRR_HISTORY_DAY = re.compile(r"^(\d{4}-\d{2}-\d{2})_sfc_\d+_CONUS.*\.zip$", re.IGNORECASE)
 _RE_NOAA = re.compile(r"Forecast_NorthAmerica_Run(\d{4}-\d{2}-\d{2})T(\d{2})Z\.pww$", re.IGNORECASE)
 _RE_ERA5_QUARTER = re.compile(r"(\d{4})[^0-9]{0,4}Q(\d)", re.IGNORECASE)
 _RE_ERA5_TX = re.compile(r"(texas|_tx[_\.\b]|northtexas|tx_)", re.IGNORECASE)
