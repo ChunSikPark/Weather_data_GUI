@@ -72,11 +72,18 @@ const TYPE_DEFS = {
   ],
   hrrr: [
     {
-      key: 'historical',
+      key: 'current',
       icon: '📅',
-      name: 'Historical',
+      name: 'Current Year',
+      tag: 'Current',
+      desc: 'This year\'s monthly HRRR archives, CONUS',
+    },
+    {
+      key: 'archive',
+      icon: '🗄️',
+      name: 'Archives',
       tag: 'Archive',
-      desc: 'Monthly archives, CONUS',
+      desc: 'Past years\' monthly HRRR archives',
     },
     {
       key: 'forecast',
@@ -88,11 +95,18 @@ const TYPE_DEFS = {
   ],
   noaa: [
     {
-      key: 'forecast',
+      key: 'recent',
       icon: '🔮',
-      name: 'Forecast',
-      tag: 'Live',
-      desc: '384-hour GFS forecast, updated 4x/day',
+      name: 'Recent',
+      tag: '16 Days',
+      desc: 'Latest 16 days of GFS forecast cycles',
+    },
+    {
+      key: 'archive',
+      icon: '📅',
+      name: 'Archive',
+      tag: 'Archive',
+      desc: 'Archived GFS forecast cycles',
     },
   ],
 };
@@ -104,10 +118,12 @@ function getApiSourceKey() {
     return selectedRegion === 'tx' ? 'era5_tx' : 'era5_na';
   }
   if (selectedSource === 'hrrr') {
-    return selectedType === 'historical' ? 'hrrr_history' : 'hrrr_forecast';
+    if (selectedType === 'current') return 'hrrr_history_current';
+    if (selectedType === 'archive') return 'hrrr_history_archive';
+    return 'hrrr_forecast';
   }
   if (selectedSource === 'noaa') {
-    return 'noaa_forecast';
+    return selectedType === 'archive' ? 'noaa_forecast_archive' : 'noaa_forecast_recent';
   }
   return null;
 }
@@ -313,13 +329,16 @@ function renderStep3() {
 
   if (selectedSource === 'era5' && selectedType === 'historical') {
     renderQuarterPicker();
-  } else if (selectedSource === 'hrrr' && selectedType === 'historical') {
-    renderMonthPicker();
-  } else if (
-    (selectedSource === 'hrrr' && selectedType === 'forecast') ||
-    (selectedSource === 'noaa' && selectedType === 'forecast')
-  ) {
-    renderCyclePicker();
+  } else if (selectedSource === 'hrrr' && selectedType === 'current') {
+    renderMonthPicker('hrrr_history_current');
+  } else if (selectedSource === 'hrrr' && selectedType === 'archive') {
+    renderMonthPicker('hrrr_history_archive');
+  } else if (selectedSource === 'hrrr' && selectedType === 'forecast') {
+    renderCyclePicker('hrrr_forecast');
+  } else if (selectedSource === 'noaa' && selectedType === 'recent') {
+    renderCyclePicker('noaa_forecast_recent');
+  } else if (selectedSource === 'noaa' && selectedType === 'archive') {
+    renderCyclePicker('noaa_forecast_archive');
   }
 }
 
@@ -454,9 +473,9 @@ function renderQuarterPicker() {
 }
 
 // ── Month Picker (HRRR Historical) ───────────────────────────────────────────
-function renderMonthPicker() {
+function renderMonthPicker(catalogKey) {
   const container = els.step3Controls;
-  const months = getCatalogList('hrrr_history', 'months');
+  const months = getCatalogList(catalogKey, 'months');
   const available = new Set(months.map(String));
 
   const years = [...new Set(
@@ -555,9 +574,8 @@ function renderMonthPicker() {
 }
 
 // ── Cycle Picker (HRRR Forecast / NOAA Forecast) ─────────────────────────────
-function renderCyclePicker() {
+function renderCyclePicker(catalogKey) {
   const container = els.step3Controls;
-  const catalogKey = state.selectedSource === 'noaa' ? 'noaa_forecast' : 'hrrr_forecast';
   const cycles = getCatalogList(catalogKey, 'cycles');
 
   // Sort newest first
@@ -666,9 +684,11 @@ function updateDownloadBar() {
   if (selectedSource === 'era5') {
     sourceLabel = `ERA5 ${selectedRegion === 'tx' ? 'Texas' : 'North America'}`;
   } else if (selectedSource === 'hrrr') {
-    sourceLabel = selectedType === 'historical' ? 'HRRR Historical' : 'HRRR Forecast';
+    if (selectedType === 'current') sourceLabel = 'HRRR Historical (Current Year)';
+    else if (selectedType === 'archive') sourceLabel = 'HRRR Historical (Archive)';
+    else sourceLabel = 'HRRR Forecast';
   } else if (selectedSource === 'noaa') {
-    sourceLabel = 'NOAA / GFS Forecast';
+    sourceLabel = selectedType === 'archive' ? 'NOAA / GFS Archive' : 'NOAA / GFS Recent';
   }
 
   // Sort and format selected dates
@@ -676,7 +696,7 @@ function updateDownloadBar() {
   let datesLabel = '';
   if (selectedSource === 'era5') {
     datesLabel = sortedDates.join(', ');
-  } else if (selectedSource === 'hrrr' && selectedType === 'historical') {
+  } else if (selectedSource === 'hrrr' && (selectedType === 'current' || selectedType === 'archive')) {
     datesLabel = sortedDates.map((d) => {
       const p = parseMonth(d);
       return p ? `${MONTHS_SHORT[p.month - 1]} ${p.year}` : d;

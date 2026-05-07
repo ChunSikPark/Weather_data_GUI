@@ -171,7 +171,11 @@ def _empty_catalog() -> dict[str, dict[str, Any]]:
     return {
         "hrrr_forecast": {"cycles": [], "file_ids": {}},
         "hrrr_history": {"months": [], "file_ids": {}},
+        "hrrr_history_current": {"months": [], "file_ids": {}},
+        "hrrr_history_archive": {"months": [], "file_ids": {}},
         "noaa_forecast": {"cycles": [], "file_ids": {}},
+        "noaa_forecast_recent": {"cycles": [], "file_ids": {}},
+        "noaa_forecast_archive": {"cycles": [], "file_ids": {}},
         "era5_na": {"quarters": [], "file_ids": {}},
         "era5_tx": {"quarters": [], "file_ids": {}},
     }
@@ -205,16 +209,14 @@ def _build_hrrr_forecast(client: DriveClient) -> dict[str, Any]:
     return out
 
 
-def _build_hrrr_history(client: DriveClient) -> dict[str, Any]:
+def _build_hrrr_history(client: DriveClient) -> dict[str, dict[str, Any]]:
     main_folder = _folder_id("GDRIVE_HRRR_HISTORY_FOLDER_ID", "hrrr_history_main")
     archive_folder = _folder_id(
         "GDRIVE_HRRR_HISTORY_ARCHIVE_FOLDER_ID", "hrrr_history_archive"
     )
 
-    out: dict[str, Any] = {"months": [], "file_ids": {}}
-    monthly: dict[str, dict[str, Any]] = {}
-
-    for folder in (main_folder, archive_folder):
+    def _scan_folder(folder: str) -> dict[str, dict[str, Any]]:
+        monthly: dict[str, dict[str, Any]] = {}
         for f in client.list_files(folder):
             name = f.get("name") or ""
             m = _RE_HRRR_HISTORY_MONTH.match(name)
@@ -223,26 +225,33 @@ def _build_hrrr_history(client: DriveClient) -> dict[str, Any]:
                 if month not in monthly:
                     monthly[month] = _entry(f)
                 continue
-            # Daily files roll up into their month bucket only if no monthly bundle exists yet.
             d = _RE_HRRR_HISTORY_DAY.match(name)
             if d:
                 month = d.group(1)[:7]
                 monthly.setdefault(month, _entry(f))
+        return monthly
 
-    months_sorted = sorted(monthly.keys(), reverse=True)
-    out["months"] = months_sorted
-    out["file_ids"] = {m: monthly[m] for m in months_sorted}
-    return out
+    def _pack(d: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        keys = sorted(d.keys(), reverse=True)
+        return {"months": keys, "file_ids": {k: d[k] for k in keys}}
+
+    current = _scan_folder(main_folder)
+    archive = _scan_folder(archive_folder)
+    combined = {**archive, **current}  # current takes precedence for same month
+
+    return {
+        "hrrr_history": _pack(combined),
+        "hrrr_history_current": _pack(current),
+        "hrrr_history_archive": _pack(archive),
+    }
 
 
-def _build_noaa(client: DriveClient) -> dict[str, Any]:
+def _build_noaa(client: DriveClient) -> dict[str, dict[str, Any]]:
     main_folder = _folder_id("GDRIVE_NOAA_FOLDER_ID", "noaa_main")
     archive_folder = _folder_id("GDRIVE_NOAA_ARCHIVE_FOLDER_ID", "noaa_archive")
 
-    out: dict[str, Any] = {"cycles": [], "file_ids": {}}
-    seen: dict[str, dict[str, Any]] = {}
-
-    for folder in (main_folder, archive_folder):
+    def _scan_folder(folder: str) -> dict[str, dict[str, Any]]:
+        seen: dict[str, dict[str, Any]] = {}
         for f in client.list_files(folder):
             name = f.get("name") or ""
             m = _RE_NOAA.search(name)
@@ -251,11 +260,21 @@ def _build_noaa(client: DriveClient) -> dict[str, Any]:
             cycle = f"{m.group(1)}T{m.group(2)}Z"
             if cycle not in seen:
                 seen[cycle] = _entry(f)
+        return seen
 
-    cycles_sorted = sorted(seen.keys(), reverse=True)
-    out["cycles"] = cycles_sorted
-    out["file_ids"] = {c: seen[c] for c in cycles_sorted}
-    return out
+    def _pack(d: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        keys = sorted(d.keys(), reverse=True)
+        return {"cycles": keys, "file_ids": {k: d[k] for k in keys}}
+
+    recent = _scan_folder(main_folder)
+    archive = _scan_folder(archive_folder)
+    combined = {**archive, **recent}  # recent takes precedence for same cycle
+
+    return {
+        "noaa_forecast": _pack(combined),
+        "noaa_forecast_recent": _pack(recent),
+        "noaa_forecast_archive": _pack(archive),
+    }
 
 
 def _build_era5(client: DriveClient) -> dict[str, dict[str, Any]]:
@@ -303,12 +322,18 @@ def build_catalog() -> dict[str, Any]:
         print(f"[catalog] hrrr_forecast failed: {exc}", file=sys.stderr)
 
     try:
-        catalog["hrrr_history"] = _build_hrrr_history(client)
+        hrrr = _build_hrrr_history(client)
+        catalog["hrrr_history"] = hrrr["hrrr_history"]
+        catalog["hrrr_history_current"] = hrrr["hrrr_history_current"]
+        catalog["hrrr_history_archive"] = hrrr["hrrr_history_archive"]
     except Exception as exc:  # pragma: no cover - defensive
         print(f"[catalog] hrrr_history failed: {exc}", file=sys.stderr)
 
     try:
-        catalog["noaa_forecast"] = _build_noaa(client)
+        noaa = _build_noaa(client)
+        catalog["noaa_forecast"] = noaa["noaa_forecast"]
+        catalog["noaa_forecast_recent"] = noaa["noaa_forecast_recent"]
+        catalog["noaa_forecast_archive"] = noaa["noaa_forecast_archive"]
     except Exception as exc:  # pragma: no cover - defensive
         print(f"[catalog] noaa_forecast failed: {exc}", file=sys.stderr)
 
