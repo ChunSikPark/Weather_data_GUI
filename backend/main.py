@@ -84,6 +84,32 @@ async def post_catalog_refresh() -> JSONResponse:
     return JSONResponse(data)
 
 
+@app.get("/api/catalog/refresh")
+async def get_catalog_refresh() -> JSONResponse:
+    """GET-friendly alias so users can trigger refresh from a browser."""
+    loop = asyncio.get_running_loop()
+    data = await loop.run_in_executor(None, catalog_module.refresh_catalog)
+    return JSONResponse(data)
+
+
+@app.get("/api/debug/folder")
+async def debug_folder(
+    folder_id: str = Query(..., description="Drive folder ID to inspect"),
+    limit: int = Query(20, ge=1, le=200),
+) -> JSONResponse:
+    """Return raw filenames in a Drive folder (with subfolders) for debugging."""
+    def _list() -> list[dict[str, str]]:
+        client = catalog_module.DriveClient()
+        files = client.list_files(folder_id)
+        return [{"name": f.get("name", ""), "id": f.get("id", "")} for f in files[:limit]] + [
+            {"_total_count": str(len(files))}  # type: ignore[dict-item]
+        ]
+
+    loop = asyncio.get_running_loop()
+    data = await loop.run_in_executor(None, _list)
+    return JSONResponse({"folder_id": folder_id, "files": data})
+
+
 @app.get("/api/download")
 async def download(
     source: str = Query(..., description="Data source identifier"),

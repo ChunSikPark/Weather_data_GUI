@@ -91,8 +91,8 @@ class DriveClient:
         self._service = build("drive", "v3", credentials=creds, cache_discovery=False)
         return self._service
 
-    def list_files(self, folder_id: str) -> list[dict[str, Any]]:
-        """List every non-trashed file in ``folder_id``.
+    def list_files(self, folder_id: str, *, recursive: bool = True, max_depth: int = 4) -> list[dict[str, Any]]:
+        """List every non-trashed file in ``folder_id`` (recursing into subfolders).
 
         Returns a list of ``{id, name, webContentLink, createdTime}`` dicts. On
         any Drive error an empty list is returned and the failure is logged.
@@ -107,51 +107,62 @@ class DriveClient:
             return []
 
         files: list[dict[str, Any]] = []
-        page_token: str | None = None
-        query = f"'{folder_id}' in parents and trashed = false"
+        # BFS over folder tree
+        queue: list[tuple[str, int]] = [(folder_id, 0)]
+        visited: set[str] = set()
         fields = "nextPageToken, files(id, name, webContentLink, createdTime, mimeType)"
 
-        try:
-            while True:
-                resp = (
-                    service.files()
-                    .list(
-                        q=query,
-                        fields=fields,
-                        pageSize=1000,
-                        pageToken=page_token,
-                        supportsAllDrives=True,
-                        includeItemsFromAllDrives=True,
+        while queue:
+            current_folder, depth = queue.pop(0)
+            if current_folder in visited:
+                continue
+            visited.add(current_folder)
+
+            page_token: str | None = None
+            query = f"'{current_folder}' in parents and trashed = false"
+            try:
+                while True:
+                    resp = (
+                        service.files()
+                        .list(
+                            q=query,
+                            fields=fields,
+                            pageSize=1000,
+                            pageToken=page_token,
+                            supportsAllDrives=True,
+                            includeItemsFromAllDrives=True,
+                        )
+                        .execute()
                     )
-                    .execute()
+                    for item in resp.get("files", []):
+                        if item.get("mimeType") == "application/vnd.google-apps.folder":
+                            if recursive and depth < max_depth and item.get("id"):
+                                queue.append((item["id"], depth + 1))
+                            continue
+                        files.append(
+                            {
+                                "id": item.get("id"),
+                                "name": item.get("name"),
+                                "webContentLink": item.get("webContentLink")
+                                or _direct_download_url(item.get("id")),
+                                "createdTime": item.get("createdTime"),
+                            }
+                        )
+                    page_token = resp.get("nextPageToken")
+                    if not page_token:
+                        break
+            except HttpError as exc:
+                print(
+                    f"[catalog] Drive list_files failed for folder {current_folder}: {exc}",
+                    file=sys.stderr,
                 )
-                for item in resp.get("files", []):
-                    if item.get("mimeType") == "application/vnd.google-apps.folder":
-                        continue
-                    files.append(
-                        {
-                            "id": item.get("id"),
-                            "name": item.get("name"),
-                            "webContentLink": item.get("webContentLink")
-                            or _direct_download_url(item.get("id")),
-                            "createdTime": item.get("createdTime"),
-                        }
-                    )
-                page_token = resp.get("nextPageToken")
-                if not page_token:
-                    break
-        except HttpError as exc:
-            print(
-                f"[catalog] Drive list_files failed for folder {folder_id}: {exc}",
-                file=sys.stderr,
-            )
-            return files
-        except Exception as exc:  # pragma: no cover - defensive
-            print(
-                f"[catalog] Unexpected error listing folder {folder_id}: {exc}",
-                file=sys.stderr,
-            )
-            return files
+                continue
+            except Exception as exc:  # pragma: no cover - defensive
+                print(
+                    f"[catalog] Unexpected error listing folder {current_folder}: {exc}",
+                    file=sys.stderr,
+                )
+                continue
 
         return files
 
@@ -283,19 +294,28 @@ def _build_noaa(client: DriveClient) -> dict[str, dict[str, Any]]:
             if cycle not in all_seen:
                 all_seen[cycle] = _entry(f)
 
-    # Split by date: recent = last 16 days, archive = older
-    cutoff = datetime.now(timezone.utc) - timedelta(days=16)
+    # Split by date: recent = within 16 days of the newest cycle (NOT "now"),
+    # so users always see the freshest 16 days even if upstream is stale.
+    parsed_dates: dict[str, datetime] = {}
+    for cycle in all_seen:
+        try:
+            parsed_dates[cycle] = datetime.strptime(cycle[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+
     recent: dict[str, dict[str, Any]] = {}
     archive: dict[str, dict[str, Any]] = {}
-    for cycle, entry in all_seen.items():
-        try:
-            cycle_date = datetime.strptime(cycle[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            if cycle_date >= cutoff:
+    if parsed_dates:
+        newest = max(parsed_dates.values())
+        cutoff = newest - timedelta(days=16)
+        for cycle, entry in all_seen.items():
+            d = parsed_dates.get(cycle)
+            if d is not None and d >= cutoff:
                 recent[cycle] = entry
             else:
                 archive[cycle] = entry
-        except ValueError:
-            archive[cycle] = entry
+    else:
+        archive = dict(all_seen)
 
     def _pack(d: dict[str, dict[str, Any]]) -> dict[str, Any]:
         keys = sorted(d.keys(), reverse=True)
