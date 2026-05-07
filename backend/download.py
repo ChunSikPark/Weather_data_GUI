@@ -15,7 +15,11 @@ from fastapi import HTTPException
 _SOURCE_LOOKUP: dict[str, dict[str, str]] = {
     "hrrr_forecast": {"catalog_key": "hrrr_forecast", "list_key": "cycles"},
     "hrrr_history": {"catalog_key": "hrrr_history", "list_key": "months"},
+    "hrrr_history_current": {"catalog_key": "hrrr_history_current", "list_key": "days"},
+    "hrrr_history_archive": {"catalog_key": "hrrr_history_archive", "list_key": "months"},
     "noaa_forecast": {"catalog_key": "noaa_forecast", "list_key": "cycles"},
+    "noaa_forecast_recent": {"catalog_key": "noaa_forecast_recent", "list_key": "cycles"},
+    "noaa_forecast_archive": {"catalog_key": "noaa_forecast_archive", "list_key": "cycles"},
     "era5_na": {"catalog_key": "era5_na", "list_key": "quarters"},
     "era5_tx": {"catalog_key": "era5_tx", "list_key": "quarters"},
 }
@@ -24,7 +28,11 @@ _SOURCE_LOOKUP: dict[str, dict[str, str]] = {
 _FILENAME_PATTERNS: dict[str, str] = {
     "hrrr_forecast": "{key}_sfc_48_CONUS.zip",
     "hrrr_history": "{key}_sfc_01_CONUS.zip",
+    "hrrr_history_current": "{key}_sfc_01_CONUS.zip",
+    "hrrr_history_archive": "{key}_sfc_01_CONUS.zip",
     "noaa_forecast": "Forecast_NorthAmerica_Run{key}.pww",
+    "noaa_forecast_recent": "Forecast_NorthAmerica_Run{key}.pww",
+    "noaa_forecast_archive": "Forecast_NorthAmerica_Run{key}.pww",
     "era5_na": "ERA5_NorthAmerica_{key}.zip",
     "era5_tx": "ERA5_Texas_{key}.zip",
 }

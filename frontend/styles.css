@@ -858,6 +858,66 @@ button {
   flex-shrink: 0;
 }
 
+/* ── ERA5 Range Selector ────────────────────────────────────── */
+.range-selector-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.range-label {
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.range-arrow {
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.range-select {
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+.range-select:focus {
+  border-color: var(--border-focus);
+}
+
+.range-apply-btn {
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: var(--radius);
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.range-apply-btn:hover {
+  background: rgba(0, 212, 170, 0.25);
+  border-color: var(--accent);
+}
+
 /* ── Step 3 Controls (no-selection message) ─────────────────── */
 .no-selection-msg {
   font-family: var(--font-data);

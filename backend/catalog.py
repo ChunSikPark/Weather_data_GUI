@@ -171,7 +171,7 @@ def _empty_catalog() -> dict[str, dict[str, Any]]:
     return {
         "hrrr_forecast": {"cycles": [], "file_ids": {}},
         "hrrr_history": {"months": [], "file_ids": {}},
-        "hrrr_history_current": {"months": [], "file_ids": {}},
+        "hrrr_history_current": {"days": [], "file_ids": {}},
         "hrrr_history_archive": {"months": [], "file_ids": {}},
         "noaa_forecast": {"cycles": [], "file_ids": {}},
         "noaa_forecast_recent": {"cycles": [], "file_ids": {}},
@@ -215,34 +215,55 @@ def _build_hrrr_history(client: DriveClient) -> dict[str, dict[str, Any]]:
         "GDRIVE_HRRR_HISTORY_ARCHIVE_FOLDER_ID", "hrrr_history_archive"
     )
 
-    def _scan_folder(folder: str) -> dict[str, dict[str, Any]]:
+    def _scan_daily(folder: str) -> dict[str, dict[str, Any]]:
+        """Returns individual day entries keyed by YYYY-MM-DD (or YYYY-MM for monthly files)."""
+        days: dict[str, dict[str, Any]] = {}
+        for f in client.list_files(folder):
+            name = f.get("name") or ""
+            d = _RE_HRRR_HISTORY_DAY.match(name)
+            if d:
+                days.setdefault(d.group(1), _entry(f))
+                continue
+            m = _RE_HRRR_HISTORY_MONTH.match(name)
+            if m:
+                days.setdefault(m.group(1), _entry(f))
+        return days
+
+    def _scan_monthly(folder: str) -> dict[str, dict[str, Any]]:
+        """Groups files by month; daily files roll into their month bucket."""
         monthly: dict[str, dict[str, Any]] = {}
         for f in client.list_files(folder):
             name = f.get("name") or ""
             m = _RE_HRRR_HISTORY_MONTH.match(name)
             if m:
-                month = m.group(1)
-                if month not in monthly:
-                    monthly[month] = _entry(f)
+                monthly.setdefault(m.group(1), _entry(f))
                 continue
             d = _RE_HRRR_HISTORY_DAY.match(name)
             if d:
-                month = d.group(1)[:7]
-                monthly.setdefault(month, _entry(f))
+                monthly.setdefault(d.group(1)[:7], _entry(f))
         return monthly
 
-    def _pack(d: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    def _pack_days(d: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        keys = sorted(d.keys(), reverse=True)
+        return {"days": keys, "file_ids": {k: d[k] for k in keys}}
+
+    def _pack_months(d: dict[str, dict[str, Any]]) -> dict[str, Any]:
         keys = sorted(d.keys(), reverse=True)
         return {"months": keys, "file_ids": {k: d[k] for k in keys}}
 
-    current = _scan_folder(main_folder)
-    archive = _scan_folder(archive_folder)
-    combined = {**archive, **current}  # current takes precedence for same month
+    current_days = _scan_daily(main_folder)
+    archive_months = _scan_monthly(archive_folder)
+
+    # Combined view: roll current daily into months, merge with archive
+    current_as_months: dict[str, dict[str, Any]] = {}
+    for day_key, entry in current_days.items():
+        current_as_months.setdefault(day_key[:7], entry)
+    combined = {**archive_months, **current_as_months}
 
     return {
-        "hrrr_history": _pack(combined),
-        "hrrr_history_current": _pack(current),
-        "hrrr_history_archive": _pack(archive),
+        "hrrr_history": _pack_months(combined),
+        "hrrr_history_current": _pack_days(current_days),
+        "hrrr_history_archive": _pack_months(archive_months),
     }
 
 

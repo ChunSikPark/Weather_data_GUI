@@ -330,7 +330,7 @@ function renderStep3() {
   if (selectedSource === 'era5' && selectedType === 'historical') {
     renderQuarterPicker();
   } else if (selectedSource === 'hrrr' && selectedType === 'current') {
-    renderMonthPicker('hrrr_history_current');
+    renderDayPicker('hrrr_history_current');
   } else if (selectedSource === 'hrrr' && selectedType === 'archive') {
     renderMonthPicker('hrrr_history_archive');
   } else if (selectedSource === 'hrrr' && selectedType === 'forecast') {
@@ -394,6 +394,39 @@ function renderQuarterPicker() {
     return;
   }
 
+  // Range selector
+  const rangeRow = document.createElement('div');
+  rangeRow.className = 'range-selector-row';
+
+  const makeSelect = (id, opts, defaultVal) => {
+    const sel = document.createElement('select');
+    sel.className = 'range-select';
+    sel.id = id;
+    opts.forEach((q) => {
+      const o = document.createElement('option');
+      o.value = q;
+      o.textContent = q;
+      sel.appendChild(o);
+    });
+    sel.value = defaultVal;
+    return sel;
+  };
+
+  const quartersSorted = [...quarters].sort(); // oldest → newest for sensible From/To
+  const fromSel = makeSelect('era5-range-from', quartersSorted, quartersSorted[0]);
+  const toSel   = makeSelect('era5-range-to',   quartersSorted, quartersSorted[quartersSorted.length - 1]);
+
+  const applyBtn = document.createElement('button');
+  applyBtn.className = 'range-apply-btn';
+  applyBtn.textContent = 'Select Range';
+
+  rangeRow.appendChild(Object.assign(document.createElement('span'), { className: 'range-label', textContent: 'From' }));
+  rangeRow.appendChild(fromSel);
+  rangeRow.appendChild(Object.assign(document.createElement('span'), { className: 'range-arrow', textContent: '→' }));
+  rangeRow.appendChild(toSel);
+  rangeRow.appendChild(applyBtn);
+  container.appendChild(rangeRow);
+
   // Build grid
   const grid = document.createElement('div');
   grid.className = 'quarter-grid';
@@ -431,6 +464,7 @@ function renderQuarterPicker() {
       const cell = document.createElement('div');
       cell.className = 'quarter-cell';
       cell.setAttribute('role', 'gridcell');
+      cell.dataset.quarter = key;
       cell.textContent = `Q${q}`;
 
       if (isAvailable) {
@@ -470,6 +504,19 @@ function renderQuarterPicker() {
   });
 
   container.appendChild(grid);
+
+  // Wire range Apply after grid exists so querySelectorAll finds the cells
+  applyBtn.addEventListener('click', () => {
+    const [start, end] = [fromSel.value, toSel.value].sort();
+    state.selectedDates.clear();
+    quarters.forEach((q) => {
+      if (q >= start && q <= end && available.has(q)) state.selectedDates.add(q);
+    });
+    grid.querySelectorAll('.quarter-cell[data-quarter]').forEach((cell) => {
+      cell.classList.toggle('selected', state.selectedDates.has(cell.dataset.quarter));
+    });
+    updateDownloadBar();
+  });
 }
 
 // ── Month Picker (HRRR Historical) ───────────────────────────────────────────
@@ -571,6 +618,84 @@ function renderMonthPicker(catalogKey) {
   });
 
   container.appendChild(grid);
+}
+
+// ── Day Picker (HRRR Current Year — individual daily files) ──────────────────
+function renderDayPicker(catalogKey) {
+  const container = els.step3Controls;
+  const days = getCatalogList(catalogKey, 'days');
+  const sorted = [...days].sort((a, b) => String(b).localeCompare(String(a)));
+
+  if (sorted.length === 0) {
+    const msg = document.createElement('p');
+    msg.className = 'no-selection-msg';
+    msg.textContent = 'No daily data available in catalog.';
+    container.appendChild(msg);
+    return;
+  }
+
+  const header = document.createElement('div');
+  header.className = 'cycle-list-header';
+  header.textContent = `${sorted.length} days available — select one or more`;
+  container.appendChild(header);
+
+  const list = document.createElement('div');
+  list.className = 'cycle-list';
+  list.setAttribute('role', 'listbox');
+  list.setAttribute('aria-multiselectable', 'true');
+  list.setAttribute('aria-label', 'Available days');
+
+  sorted.forEach((raw) => {
+    const isDay = raw.length === 10; // YYYY-MM-DD
+    let label = raw;
+    if (isDay) {
+      const p = parseMonth(raw.slice(0, 7));
+      const day = parseInt(raw.slice(8, 10), 10);
+      label = p ? `${MONTHS_SHORT[p.month - 1]} ${day}, ${p.year}` : raw;
+    } else {
+      const p = parseMonth(raw);
+      label = p ? `${MONTHS_SHORT[p.month - 1]} ${p.year}` : raw;
+    }
+    const isSelected = state.selectedDates.has(raw);
+
+    const item = document.createElement('div');
+    item.className = 'cycle-item' + (isSelected ? ' selected' : '');
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-selected', String(isSelected));
+    item.setAttribute('tabindex', '0');
+
+    const checkbox = document.createElement('div');
+    checkbox.className = 'cycle-checkbox';
+    checkbox.setAttribute('aria-hidden', 'true');
+
+    const dateEl = document.createElement('span');
+    dateEl.className = 'cycle-date';
+    dateEl.textContent = label;
+
+    item.appendChild(checkbox);
+    item.appendChild(dateEl);
+
+    const toggle = () => {
+      if (state.selectedDates.has(raw)) {
+        state.selectedDates.delete(raw);
+        item.classList.remove('selected');
+        item.setAttribute('aria-selected', 'false');
+      } else {
+        state.selectedDates.add(raw);
+        item.classList.add('selected');
+        item.setAttribute('aria-selected', 'true');
+      }
+      updateDownloadBar();
+    };
+    item.addEventListener('click', toggle);
+    item.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+    });
+
+    list.appendChild(item);
+  });
+
+  container.appendChild(list);
 }
 
 // ── Cycle Picker (HRRR Forecast / NOAA Forecast) ─────────────────────────────
@@ -696,7 +821,17 @@ function updateDownloadBar() {
   let datesLabel = '';
   if (selectedSource === 'era5') {
     datesLabel = sortedDates.join(', ');
-  } else if (selectedSource === 'hrrr' && (selectedType === 'current' || selectedType === 'archive')) {
+  } else if (selectedSource === 'hrrr' && selectedType === 'current') {
+    datesLabel = sortedDates.map((d) => {
+      if (d.length === 10) {
+        const p = parseMonth(d.slice(0, 7));
+        const day = parseInt(d.slice(8, 10), 10);
+        return p ? `${MONTHS_SHORT[p.month - 1]} ${day}, ${p.year}` : d;
+      }
+      const p = parseMonth(d);
+      return p ? `${MONTHS_SHORT[p.month - 1]} ${p.year}` : d;
+    }).join(', ');
+  } else if (selectedSource === 'hrrr' && selectedType === 'archive') {
     datesLabel = sortedDates.map((d) => {
       const p = parseMonth(d);
       return p ? `${MONTHS_SHORT[p.month - 1]} ${p.year}` : d;
