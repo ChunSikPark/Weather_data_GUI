@@ -75,13 +75,19 @@ class DriveClient:
     def _get_service(self):
         if self._service is not None:
             return self._service
-        if not os.path.exists(self._credentials_path):
+        content = os.environ.get("GDRIVE_CREDENTIALS_JSON_CONTENT")
+        if content:
+            import json as _json
+            info = _json.loads(content)
+            creds = Credentials.from_service_account_info(info, scopes=_SCOPES)
+        elif os.path.exists(self._credentials_path):
+            creds = Credentials.from_service_account_file(
+                self._credentials_path, scopes=_SCOPES
+            )
+        else:
             raise FileNotFoundError(
                 f"Service account credentials not found at {self._credentials_path}"
             )
-        creds = Credentials.from_service_account_file(
-            self._credentials_path, scopes=_SCOPES
-        )
         self._service = build("drive", "v3", credentials=creds, cache_discovery=False)
         return self._service
 
