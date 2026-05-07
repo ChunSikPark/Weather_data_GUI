@@ -52,8 +52,8 @@ def _credentials_path() -> str:
 # ---------------------------------------------------------------------------
 
 _RE_HRRR_FORECAST = re.compile(r"(\d{4}-\d{2}-\d{2})T(\d{2})Z_sfc_48_CONUS\.zip$", re.IGNORECASE)
-_RE_HRRR_HISTORY_MONTH = re.compile(r"^(\d{4}-\d{2})_sfc_\d+_CONUS.*\.zip$", re.IGNORECASE)
-_RE_HRRR_HISTORY_DAY = re.compile(r"^(\d{4}-\d{2}-\d{2})_sfc_\d+_CONUS.*\.zip$", re.IGNORECASE)
+_RE_HRRR_HISTORY_MONTH = re.compile(r"^CONUS_?(\d{4})_(\d{2})\.zip$", re.IGNORECASE)
+_RE_HRRR_HISTORY_DAY = re.compile(r"^CONUS_(\d{4})_(\d{2})_(\d{2})\.zip$", re.IGNORECASE)
 _RE_NOAA = re.compile(r"Forecast_NorthAmerica_Run(\d{4}-\d{2}-\d{2})T(\d{2})Z\.pww$", re.IGNORECASE)
 _RE_ERA5_QUARTER = re.compile(r"(\d{4})[^0-9]{0,4}Q(\d)", re.IGNORECASE)
 _RE_ERA5_TX = re.compile(r"(texas|_tx[_\.\b]|northtexas|tx_)", re.IGNORECASE)
@@ -233,11 +233,13 @@ def _build_hrrr_history(client: DriveClient) -> dict[str, dict[str, Any]]:
             name = f.get("name") or ""
             d = _RE_HRRR_HISTORY_DAY.match(name)
             if d:
-                days.setdefault(d.group(1), _entry(f))
+                key = f"{d.group(1)}-{d.group(2)}-{d.group(3)}"
+                days.setdefault(key, _entry(f))
                 continue
             m = _RE_HRRR_HISTORY_MONTH.match(name)
             if m:
-                days.setdefault(m.group(1), _entry(f))
+                key = f"{m.group(1)}-{m.group(2)}"
+                days.setdefault(key, _entry(f))
         return days
 
     def _scan_monthly(folder: str) -> dict[str, dict[str, Any]]:
@@ -247,11 +249,13 @@ def _build_hrrr_history(client: DriveClient) -> dict[str, dict[str, Any]]:
             name = f.get("name") or ""
             m = _RE_HRRR_HISTORY_MONTH.match(name)
             if m:
-                monthly.setdefault(m.group(1), _entry(f))
+                key = f"{m.group(1)}-{m.group(2)}"
+                monthly.setdefault(key, _entry(f))
                 continue
             d = _RE_HRRR_HISTORY_DAY.match(name)
             if d:
-                monthly.setdefault(d.group(1)[:7], _entry(f))
+                key = f"{d.group(1)}-{d.group(2)}"
+                monthly.setdefault(key, _entry(f))
         return monthly
 
     def _pack_days(d: dict[str, dict[str, Any]]) -> dict[str, Any]:

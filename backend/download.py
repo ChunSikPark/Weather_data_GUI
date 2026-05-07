@@ -27,9 +27,9 @@ _SOURCE_LOOKUP: dict[str, dict[str, str]] = {
 # Default download filename pattern per source.
 _FILENAME_PATTERNS: dict[str, str] = {
     "hrrr_forecast": "{key}_sfc_48_CONUS.zip",
-    "hrrr_history": "{key}_sfc_01_CONUS.zip",
-    "hrrr_history_current": "{key}_sfc_01_CONUS.zip",
-    "hrrr_history_archive": "{key}_sfc_01_CONUS.zip",
+    "hrrr_history": "CONUS_{key}.zip",
+    "hrrr_history_current": "CONUS_{key}.zip",
+    "hrrr_history_archive": "CONUS_{key}.zip",
     "noaa_forecast": "Forecast_NorthAmerica_Run{key}.pww",
     "noaa_forecast_recent": "Forecast_NorthAmerica_Run{key}.pww",
     "noaa_forecast_archive": "Forecast_NorthAmerica_Run{key}.pww",
