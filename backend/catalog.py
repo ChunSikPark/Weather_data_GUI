@@ -282,43 +282,27 @@ def _build_noaa(client: DriveClient) -> dict[str, dict[str, Any]]:
     main_folder = _folder_id("GDRIVE_NOAA_FOLDER_ID", "noaa_main")
     archive_folder = _folder_id("GDRIVE_NOAA_ARCHIVE_FOLDER_ID", "noaa_archive")
 
-    # Scan all folders together — don't assume which folder holds recent vs old data
-    all_seen: dict[str, dict[str, Any]] = {}
-    for folder in (main_folder, archive_folder):
+    def _scan(folder: str) -> dict[str, dict[str, Any]]:
+        seen: dict[str, dict[str, Any]] = {}
         for f in client.list_files(folder):
             name = f.get("name") or ""
             m = _RE_NOAA.search(name)
             if not m:
                 continue
             cycle = f"{m.group(1)}T{m.group(2)}Z"
-            if cycle not in all_seen:
-                all_seen[cycle] = _entry(f)
-
-    # Recent shows every cycle in the Drive (no date filter).
-    # Archive still narrows to cycles older than the newest-16-days for users
-    # who want to scan deep history without the freshest noise.
-    recent: dict[str, dict[str, Any]] = dict(all_seen)
-    archive: dict[str, dict[str, Any]] = {}
-    parsed_dates: dict[str, datetime] = {}
-    for cycle in all_seen:
-        try:
-            parsed_dates[cycle] = datetime.strptime(cycle[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        except ValueError:
-            pass
-    if parsed_dates:
-        newest = max(parsed_dates.values())
-        cutoff = newest - timedelta(days=16)
-        for cycle, entry in all_seen.items():
-            d = parsed_dates.get(cycle)
-            if d is None or d < cutoff:
-                archive[cycle] = entry
+            seen.setdefault(cycle, _entry(f))
+        return seen
 
     def _pack(d: dict[str, dict[str, Any]]) -> dict[str, Any]:
         keys = sorted(d.keys(), reverse=True)
         return {"cycles": keys, "file_ids": {k: d[k] for k in keys}}
 
+    recent = _scan(main_folder)        # ONLY the recent/main folder
+    archive = _scan(archive_folder)    # ONLY the archive folder
+    combined = {**archive, **recent}   # recent wins on overlap
+
     return {
-        "noaa_forecast": _pack(all_seen),
+        "noaa_forecast": _pack(combined),
         "noaa_forecast_recent": _pack(recent),
         "noaa_forecast_archive": _pack(archive),
     }
