@@ -294,28 +294,24 @@ def _build_noaa(client: DriveClient) -> dict[str, dict[str, Any]]:
             if cycle not in all_seen:
                 all_seen[cycle] = _entry(f)
 
-    # Split by date: recent = within 16 days of the newest cycle (NOT "now"),
-    # so users always see the freshest 16 days even if upstream is stale.
+    # Recent shows every cycle in the Drive (no date filter).
+    # Archive still narrows to cycles older than the newest-16-days for users
+    # who want to scan deep history without the freshest noise.
+    recent: dict[str, dict[str, Any]] = dict(all_seen)
+    archive: dict[str, dict[str, Any]] = {}
     parsed_dates: dict[str, datetime] = {}
     for cycle in all_seen:
         try:
             parsed_dates[cycle] = datetime.strptime(cycle[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
         except ValueError:
             pass
-
-    recent: dict[str, dict[str, Any]] = {}
-    archive: dict[str, dict[str, Any]] = {}
     if parsed_dates:
         newest = max(parsed_dates.values())
         cutoff = newest - timedelta(days=16)
         for cycle, entry in all_seen.items():
             d = parsed_dates.get(cycle)
-            if d is not None and d >= cutoff:
-                recent[cycle] = entry
-            else:
+            if d is None or d < cutoff:
                 archive[cycle] = entry
-    else:
-        archive = dict(all_seen)
 
     def _pack(d: dict[str, dict[str, Any]]) -> dict[str, Any]:
         keys = sorted(d.keys(), reverse=True)
