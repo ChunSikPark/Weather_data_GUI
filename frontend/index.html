@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Team Overbye — Weather Data Portal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=JetBrains+Mono:wght@400;500&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header id="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <span class="header-wordmark">Team Overbye</span>
+        <span class="header-divider"></span>
+        <span class="header-subtitle">Weather Data Portal</span>
+      </div>
+      <div class="header-right" id="pipeline-status">
+        <span class="pipeline-label">PIPELINES</span>
+        <div class="pipeline-dots" id="pipeline-dots">
+          <span class="pipeline-dot-item">
+            <span class="status-dot status-loading" id="dot-era5"></span>
+            <span class="dot-label">ERA5</span>
+          </span>
+          <span class="pipeline-dot-item">
+            <span class="status-dot status-loading" id="dot-hrrr"></span>
+            <span class="dot-label">HRRR</span>
+          </span>
+          <span class="pipeline-dot-item">
+            <span class="status-dot status-loading" id="dot-noaa"></span>
+            <span class="dot-label">GFS</span>
+          </span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main id="main-content">
+
+    <section id="step1" class="step-section active">
+      <div class="step-header">
+        <span class="step-index">01</span>
+        <span class="step-label">SOURCE</span>
+        <span class="step-title">Select Data Source</span>
+      </div>
+      <div id="step1-error" class="step-error hidden">
+        <span class="error-icon">&#9888;</span>
+        <span id="step1-error-msg">Failed to load catalog. Check your connection.</span>
+      </div>
+      <div class="card-grid" id="source-grid">
+        <div class="source-card" data-source="era5" role="button" tabindex="0" aria-pressed="false">
+          <div class="card-icon">&#128752;</div>
+          <div class="card-name">ERA5</div>
+          <div class="card-tag">Reanalysis</div>
+          <div class="card-desc">ERA5 Reanalysis — 0.25° grid, from Copernicus</div>
+        </div>
+        <div class="source-card" data-source="hrrr" role="button" tabindex="0" aria-pressed="false">
+          <div class="card-icon">&#128225;</div>
+          <div class="card-name">HRRR</div>
+          <div class="card-tag">Forecast</div>
+          <div class="card-desc">HRRR Forecast — ~3 km resolution, CONUS</div>
+        </div>
+        <div class="source-card" data-source="noaa" role="button" tabindex="0" aria-pressed="false">
+          <div class="card-icon">&#127758;</div>
+          <div class="card-name">NOAA / GFS</div>
+          <div class="card-tag">Global</div>
+          <div class="card-desc">GFS Forecast — 0.25°, North America</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="step2" class="step-section hidden">
+      <div class="step-header">
+        <span class="step-index">02</span>
+        <span class="step-label">TYPE</span>
+        <span class="step-title">Select Data Type</span>
+      </div>
+      <div class="card-grid" id="type-grid">
+        <!-- populated by JS -->
+      </div>
+    </section>
+
+    <section id="step3" class="step-section hidden">
+      <div class="step-header">
+        <span class="step-index">03</span>
+        <span class="step-label">DATES</span>
+        <span class="step-title">Select Date Range</span>
+      </div>
+      <div id="step3-controls">
+        <!-- populated by JS -->
+      </div>
+    </section>
+
+  </main>
+
+  <footer id="download-bar">
+    <div class="download-bar-inner">
+      <div class="download-summary">
+        <span class="download-summary-icon">&#8681;</span>
+        <span id="download-summary-text" class="download-summary-text">No data selected</span>
+      </div>
+      <div class="download-actions">
+        <span id="download-error" class="download-error hidden"></span>
+        <button id="btn-download" class="btn-download" disabled aria-label="Download selected data">
+          <span class="btn-download-icon" id="download-icon">&#8681;</span>
+          <span id="btn-download-label">Download</span>
+        </button>
+      </div>
+    </div>
+  </footer>
+
+</body>
+<script>
+  // Allow backend to inject API base at runtime
+  // Example: window.API_BASE = 'https://api.myserver.com'
+</script>
+<script type="module" src="main.js"></script>
+</html>

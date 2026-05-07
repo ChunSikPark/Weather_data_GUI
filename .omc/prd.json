@@ -1,0 +1,131 @@
+{
+  "project": "Team Overbye Weather Data Website",
+  "description": "Public website + FastAPI backend + PyPI package for browsing and downloading weather data from Google Drive",
+  "stories": [
+    {
+      "id": "US-001",
+      "title": "Project scaffold and structure",
+      "priority": 1,
+      "passes": true,
+      "acceptanceCriteria": [
+        "D:\\Project\\weather-website\\frontend\\index.html exists",
+        "D:\\Project\\weather-website\\backend\\main.py exists with FastAPI app",
+        "D:\\Project\\weather-website\\package\\pyproject.toml exists with name='TeamOverbyeWeather'",
+        "D:\\Project\\weather-website\\backend\\requirements.txt exists",
+        "D:\\Project\\weather-website\\.env.example documents all required env vars"
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "Backend - Drive catalog endpoint",
+      "priority": 2,
+      "passes": true,
+      "acceptanceCriteria": [
+        "GET /api/catalog returns JSON with keys: era5_na, era5_tx, hrrr_history, hrrr_forecast, noaa_forecast",
+        "era5_na and era5_tx have 'quarters' array (e.g. ['2024-Q1','2024-Q2'])",
+        "hrrr_history has 'months' array (e.g. ['2024-01','2024-02'])",
+        "hrrr_forecast and noaa_forecast have 'cycles' array (e.g. ['2026-04-21T06Z'])",
+        "Catalog is cached in memory and has a /api/catalog/refresh endpoint",
+        "backend/catalog.py contains DriveClient class with list_* methods"
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Backend - Pipeline status endpoint",
+      "priority": 3,
+      "passes": true,
+      "acceptanceCriteria": [
+        "GET /api/status returns JSON with keys: noaa, hrrr_forecast, hrrr_history, era5",
+        "Each value is one of: 'ok', 'warning', 'error', 'unknown'",
+        "Reads from ALERT_STATE_PATH env var (defaults to config/alert_state.json)",
+        "Returns 'unknown' for all pipelines when file is missing or unreadable",
+        "Maps alert_active:true -> 'error', alert_active:false -> 'ok'"
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Backend - Download endpoint",
+      "priority": 4,
+      "passes": true,
+      "acceptanceCriteria": [
+        "GET /api/download?source=era5_na&dates=2024-Q1 returns redirect to Drive webContentLink (single file)",
+        "GET /api/download?source=era5_na&dates=2024-Q1,2024-Q2 streams a ZIP bundle as application/zip",
+        "GET /api/download?source=hrrr_history&dates=2024-01 returns redirect for single month ZIP",
+        "GET /api/download?source=noaa_forecast&dates=2026-04-21T06Z returns redirect for single PWW file",
+        "backend/download.py contains build_zip_stream() that streams without storing full file on disk",
+        "Returns 404 with JSON error when requested files are not found in catalog"
+      ]
+    },
+    {
+      "id": "US-005",
+      "title": "Frontend - Pipeline status bar and Step 1 (Data Source)",
+      "priority": 5,
+      "passes": true,
+      "acceptanceCriteria": [
+        "Status bar at top of page shows colored dot + label for each pipeline (NOAA, HRRR Forecast, HRRR History, ERA5)",
+        "Green dot when status='ok', yellow when 'warning', red when 'error', grey when 'unknown'",
+        "Status auto-refreshes every 5 minutes via fetch('/api/status')",
+        "Step 1 shows 3 clickable cards: ERA5 (satellite icon), HRRR (radar icon), NOAA/GFS (globe icon)",
+        "Each card has a short description of the dataset",
+        "Clicking a card highlights it and reveals Step 2"
+      ]
+    },
+    {
+      "id": "US-006",
+      "title": "Frontend - Step 2 (Type) and Step 3 (Date picker)",
+      "priority": 6,
+      "passes": true,
+      "acceptanceCriteria": [
+        "Step 2 shows Type cards filtered by Step 1: ERA5 shows Historical only; HRRR shows Historical+Forecast; NOAA shows Forecast only",
+        "Step 3 renders quarter grid for ERA5 (Q1-Q4 x year), multi-select allowed",
+        "Step 3 renders month grid for HRRR Historical (clickable month cells), multi-select allowed",
+        "Step 3 renders scrollable cycle list for HRRR/NOAA Forecast (last 9 days x 4 cycles/day)",
+        "Selected dates highlighted with distinct style",
+        "Changing Step 1 or Step 2 resets Step 3 selection"
+      ]
+    },
+    {
+      "id": "US-007",
+      "title": "Frontend - Download bar and action",
+      "priority": 7,
+      "passes": true,
+      "acceptanceCriteria": [
+        "Download bar at bottom shows summary: e.g. 'ERA5 North America — Q1 2025, Q2 2025 (2 files → ZIP)'",
+        "Download button is disabled when no dates selected",
+        "Single file selected: clicking Download triggers redirect to /api/download which delivers file directly",
+        "Multiple files selected: clicking Download triggers ZIP stream download from /api/download",
+        "Loading spinner shown on Download button while request is in progress",
+        "Error message shown if /api/download returns non-200 response"
+      ]
+    },
+    {
+      "id": "US-008",
+      "title": "TeamOverbyeWeather Python package",
+      "priority": 8,
+      "passes": true,
+      "acceptanceCriteria": [
+        "package/TeamOverbyeWeather/__init__.py exports WeatherClient",
+        "WeatherClient(base_url='https://...') accepts optional base_url",
+        "client.era5.list_quarters(region='north_america') returns list of quarter strings",
+        "client.era5.download(region='north_america', quarters=['2025-Q1'], dest='./data/') downloads file",
+        "client.noaa.download_latest(dest='./data/') downloads most recent NOAA forecast",
+        "client.status() returns dict with pipeline health",
+        "package/pyproject.toml has correct metadata, dependencies (requests, tqdm)",
+        "package/README.md has installation and usage examples"
+      ]
+    },
+    {
+      "id": "US-009",
+      "title": "Deployment configuration and documentation",
+      "priority": 9,
+      "passes": true,
+      "acceptanceCriteria": [
+        "backend/Dockerfile builds a working FastAPI container (FROM python:3.12-slim)",
+        "backend/docker-compose.yml mounts alert_state.json from host path via ALERT_STATE_PATH",
+        ".env.example documents: GDRIVE_CREDENTIALS_JSON, GDRIVE_ROOT_FOLDER_ID, ALERT_STATE_PATH, CORS_ORIGINS",
+        "README.md at project root documents: architecture diagram, local dev setup, Cloudflare Pages deployment steps, Railway/Render backend deploy steps",
+        "frontend/README.md documents how to point the frontend at a custom API URL"
+      ]
+    }
+  ]
+}

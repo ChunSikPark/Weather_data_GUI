@@ -1,0 +1,11 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.env
+    volumes:
+      - ${ALERT_STATE_HOST_PATH:-/dev/null}:${ALERT_STATE_PATH:-/app/config/alert_state.json}:ro
+      - ${GDRIVE_CREDENTIALS_HOST_DIR:-./credentials}:/app/credentials:ro
+    restart: unless-stopped

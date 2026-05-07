@@ -1,0 +1,61 @@
+## Ralph Progress Log — Team Overbye Weather Website
+## Project: D:\Project\weather-website
+## Started: 2026-05-06
+
+### Iteration 1
+
+**Decisions made:**
+- Location: D:\Project\weather-website (standalone, outside OneDrive sync)
+- Backend: FastAPI on VPS/Railway + Cloudflare CDN proxy
+- Status source: alert_state.json mounted as volume on same Docker host
+- Scope: Website + PyPI package in parallel
+
+**Key folder IDs (from AGENTS.md):**
+- HRRR Forecast: 1yuEH5020Nh-Km5_PvYfmVpWTQIhzI1Iz
+- HRRR History: 1Uc-tuSPEnh7rJzC3nFvxndFvULrsNe-U
+- HRRR History Archive: 1_govjuY2WV0TqHp_7PwVVtrGPCDU-I9v
+- NOAA: 1wICJMuO0MRopG3hpPFt7MzFmx5M33v4R
+- NOAA Archive: 1TTa-bDV88sSf4strSW649UHPRddMHJtr
+- ERA5 main: 1jN1NP3b5Nby-gpy5w1rqe2cgctESxqO-
+- ERA5 archive: 1PD_y38k6x8HjDR8Wv-15NsZ6pdZ9pVPz
+- ERA5 quarterly: 12U8PNHHGIxCy8_GRzsF2KxZ4GneMWy6h
+- Website root: 1-nsEIuzKt5XHJlCfNFivuOzBF-BnHpfS
+
+**Service account:** drive-script-bot@pydrive2-461721.iam.gserviceaccount.com
+
+**Architecture:**
+- frontend/ (Cloudflare Pages) — HTML/CSS/JS, no framework
+- backend/ (FastAPI, Docker) — catalog cache, status reader, ZIP streaming
+- package/ (PyPI) — TeamOverbyeWeather Python SDK
+
+### Implementation Complete
+
+**Files created:**
+- backend/main.py — FastAPI app, 5 routes, lifespan catalog warmup
+- backend/catalog.py — DriveClient, regex parsers, 30-min TTL thread-safe cache
+- backend/status.py — alert_state.json reader, pipeline→status mapping
+- backend/download.py — build_zip_stream(), iter_zip_chunks(), 404 handling
+- backend/requirements.txt, Dockerfile, docker-compose.yml
+- frontend/index.html — Bencium Scientific Dark, 3-step layout, status bar
+- frontend/styles.css — CSS custom properties, quarter/month/cycle grids, animations
+- frontend/main.js — ES module, parallel init, multi-select, keyboard accessibility
+- frontend/README.md — API_BASE configuration docs
+- package/TeamOverbyeWeather/__init__.py, client.py
+- package/TeamOverbyeWeather/sources/era5.py, hrrr.py, noaa.py
+- package/TeamOverbyeWeather/utils.py
+- package/pyproject.toml, package/README.md
+- .env.example, README.md
+
+**Bugs found and fixed:**
+- era5.py: catalog key "available" → "quarters"
+- hrrr.py: two instances of "available" → "months" / "cycles"
+- noaa.py: catalog section "noaa" → "noaa_forecast"; key "available" → "cycles"; source param "noaa" → "noaa_forecast"
+- main.js: HRRR status dot used non-existent data.hrrr key → fixed with _worstStatus(hrrr_forecast, hrrr_history)
+
+**Key patterns learned:**
+- FastAPI lifespan context manager for catalog warmup (replaces deprecated @app.on_event)
+- google-auth + googleapiclient preferred over PyDrive2 for service account auth
+- ZIP_STORED is correct for bundles of already-compressed files (.zip, .pww)
+- threading.Lock() at module level is safe for FastAPI (sync catalog building)
+- ES modules avoid need for bundler; import maps would be next step if deps needed
+- Catalog degrades gracefully to empty lists (not exception) on Drive API failure
