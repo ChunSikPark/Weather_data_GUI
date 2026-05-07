@@ -28,11 +28,12 @@ _DEFAULT_FOLDERS = {
     "hrrr_forecast": "1yuEH5020Nh-Km5_PvYfmVpWTQIhzI1Iz",
     "hrrr_history_main": "1Uc-tuSPEnh7rJzC3nFvxndFvULrsNe-U",
     "hrrr_history_archive": "1_govjuY2WV0TqHp_7PwVVtrGPCDU-I9v",
-    "noaa_main": "1wICJMuO0MRopG3hpPFt7MzFmx5M33v4R",
+    "noaa_main": "1kAOe-dGHByzZHijHGo8rmL7x4KY6OMav",
     "noaa_archive": "1TTa-bDV88sSf4strSW649UHPRddMHJtr",
     "era5_main": "1jN1NP3b5Nby-gpy5w1rqe2cgctESxqO-",
     "era5_archive": "1PD_y38k6x8HjDR8Wv-15NsZ6pdZ9pVPz",
     "era5_quarterly": "12U8PNHHGIxCy8_GRzsF2KxZ4GneMWy6h",
+    "era5_history_zip": "1O8VjwFKXCJ3DR56_UEep-rXyb7OHNGMZ",
 }
 
 _DEFAULT_CREDENTIALS_PATH = "/app/credentials/service_account.json"
@@ -252,26 +253,30 @@ def _build_noaa(client: DriveClient) -> dict[str, Any]:
 
 
 def _build_era5(client: DriveClient) -> dict[str, dict[str, Any]]:
-    folder = _folder_id("GDRIVE_ERA5_QUARTERLY_FOLDER_ID", "era5_quarterly")
+    folders = [
+        _folder_id("GDRIVE_ERA5_QUARTERLY_FOLDER_ID", "era5_quarterly"),
+        _folder_id("GDRIVE_ERA5_HISTORY_ZIP_FOLDER_ID", "era5_history_zip"),
+    ]
 
     na: dict[str, dict[str, Any]] = {}
     tx: dict[str, dict[str, Any]] = {}
 
-    for f in client.list_files(folder):
-        name = f.get("name") or ""
-        m = _RE_ERA5_QUARTER.search(name)
-        if not m:
-            continue
-        quarter = f"{m.group(1)}-Q{m.group(2)}"
+    for folder in folders:
+        for f in client.list_files(folder):
+            name = f.get("name") or ""
+            m = _RE_ERA5_QUARTER.search(name)
+            if not m:
+                continue
+            quarter = f"{m.group(1)}-Q{m.group(2)}"
 
-        bucket = na
-        if _RE_ERA5_TX.search(name):
-            bucket = tx
-        elif _RE_ERA5_NA.search(name):
             bucket = na
+            if _RE_ERA5_TX.search(name):
+                bucket = tx
+            elif _RE_ERA5_NA.search(name):
+                bucket = na
 
-        if quarter not in bucket:
-            bucket[quarter] = _entry(f)
+            if quarter not in bucket:
+                bucket[quarter] = _entry(f)
 
     def pack(d: dict[str, dict[str, Any]]) -> dict[str, Any]:
         keys = sorted(d.keys(), reverse=True)
