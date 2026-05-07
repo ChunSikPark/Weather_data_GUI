@@ -335,7 +335,6 @@ function renderQuarterPicker() {
 
   [
     { key: 'na', label: 'North America' },
-    { key: 'tx', label: 'Texas' },
   ].forEach(({ key, label }) => {
     const btn = document.createElement('button');
     btn.className = 'region-btn' + (state.selectedRegion === key ? ' active' : '');
