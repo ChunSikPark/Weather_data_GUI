@@ -271,28 +271,38 @@ def _build_noaa(client: DriveClient) -> dict[str, dict[str, Any]]:
     main_folder = _folder_id("GDRIVE_NOAA_FOLDER_ID", "noaa_main")
     archive_folder = _folder_id("GDRIVE_NOAA_ARCHIVE_FOLDER_ID", "noaa_archive")
 
-    def _scan_folder(folder: str) -> dict[str, dict[str, Any]]:
-        seen: dict[str, dict[str, Any]] = {}
+    # Scan all folders together — don't assume which folder holds recent vs old data
+    all_seen: dict[str, dict[str, Any]] = {}
+    for folder in (main_folder, archive_folder):
         for f in client.list_files(folder):
             name = f.get("name") or ""
             m = _RE_NOAA.search(name)
             if not m:
                 continue
             cycle = f"{m.group(1)}T{m.group(2)}Z"
-            if cycle not in seen:
-                seen[cycle] = _entry(f)
-        return seen
+            if cycle not in all_seen:
+                all_seen[cycle] = _entry(f)
+
+    # Split by date: recent = last 16 days, archive = older
+    cutoff = datetime.now(timezone.utc) - timedelta(days=16)
+    recent: dict[str, dict[str, Any]] = {}
+    archive: dict[str, dict[str, Any]] = {}
+    for cycle, entry in all_seen.items():
+        try:
+            cycle_date = datetime.strptime(cycle[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            if cycle_date >= cutoff:
+                recent[cycle] = entry
+            else:
+                archive[cycle] = entry
+        except ValueError:
+            archive[cycle] = entry
 
     def _pack(d: dict[str, dict[str, Any]]) -> dict[str, Any]:
         keys = sorted(d.keys(), reverse=True)
         return {"cycles": keys, "file_ids": {k: d[k] for k in keys}}
 
-    recent = _scan_folder(main_folder)
-    archive = _scan_folder(archive_folder)
-    combined = {**archive, **recent}  # recent takes precedence for same cycle
-
     return {
-        "noaa_forecast": _pack(combined),
+        "noaa_forecast": _pack(all_seen),
         "noaa_forecast_recent": _pack(recent),
         "noaa_forecast_archive": _pack(archive),
     }
