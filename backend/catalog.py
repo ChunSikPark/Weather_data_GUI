@@ -283,8 +283,9 @@ def _build_hrrr_history(client: DriveClient) -> dict[str, dict[str, Any]]:
 
 
 def _build_noaa(client: DriveClient) -> dict[str, dict[str, Any]]:
-    main_folder = _folder_id("GDRIVE_NOAA_FOLDER_ID", "noaa_main")
-    archive_folder = _folder_id("GDRIVE_NOAA_ARCHIVE_FOLDER_ID", "noaa_archive")
+    # Hardcoded — ignore env var overrides since Railway has stale/wrong values set
+    main_folder = "1kAOe-dGHByzZHijHGo8rmL7x4KY6OMav"
+    archive_folder = "1TTa-bDV88sSf4strSW649UHPRddMHJtr"
 
     def _scan(folder: str) -> dict[str, dict[str, Any]]:
         seen: dict[str, dict[str, Any]] = {}
