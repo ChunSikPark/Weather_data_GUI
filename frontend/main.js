@@ -12,6 +12,10 @@ const state = {
   selectedType: null,     // 'historical' | 'forecast'
   selectedRegion: 'na',   // 'na' | 'tx' (ERA5 only)
   selectedDates: new Set(),
+  selectedRegions: null,     // null | { layer: 'states'|'iso'|'custom', ids?: string[], bbox?: number[] }
+  regionPanelRendered: false,
+  regionCatalog: null,       // { states: [...], iso: [...] }
+  regionActiveTab: 'states',
 };
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
@@ -262,6 +266,8 @@ function selectSource(source) {
   state.selectedType = null;
   state.selectedRegion = 'na';
   state.selectedDates.clear();
+  state.selectedRegions = null;
+  state.regionPanelRendered = false;
 
   // Update card visual state
   els.sourceGrid.querySelectorAll('.source-card').forEach((c) => {
@@ -307,6 +313,7 @@ function renderTypeCards(source) {
 function selectType(type) {
   state.selectedType = type;
   state.selectedDates.clear();
+  state.selectedRegions = null;
 
   els.typeGrid.querySelectorAll('.type-card').forEach((c) => {
     const isSelected = c.dataset.type === type;
@@ -351,6 +358,8 @@ function renderStep3() {
   } else if (selectedSource === 'noaa' && selectedType === 'archive') {
     renderCyclePicker('noaa_forecast_archive');
   }
+
+  renderRegionPanelOnce();
 }
 
 // ── Quarter Picker (ERA5 Historical) ─────────────────────────────────────────
@@ -802,6 +811,7 @@ function getCatalogList(sourceKey, listKey) {
 
 // ── Download bar ─────────────────────────────────────────────────────────────
 function updateDownloadBar() {
+  updateRegionPanel();
   const { selectedSource, selectedType, selectedRegion, selectedDates } = state;
   const count = selectedDates.size;
 
@@ -859,7 +869,8 @@ function updateDownloadBar() {
 
   const fileWord = count === 1 ? 'file' : 'files';
   const archiveHint = count > 1 ? ' → ZIP' : '';
-  const summary = `${sourceLabel} — ${datesLabel} (${count} ${fileWord}${archiveHint})`;
+  const regionLabel = _buildRegionLabel();
+  const summary = `${sourceLabel} — ${datesLabel}${regionLabel} (${count} ${fileWord}${archiveHint})`;
 
   els.downloadSummaryText.textContent = summary;
   els.downloadSummaryText.classList.add('has-selection');
@@ -870,7 +881,15 @@ function updateDownloadBar() {
 function buildDownloadURL() {
   const sourceKey = getApiSourceKey();
   const dates = [...state.selectedDates].sort().join(',');
-  return `${API_BASE}/api/download?source=${encodeURIComponent(sourceKey)}&dates=${encodeURIComponent(dates)}`;
+  const sel = state.selectedRegions;
+  if (!sel) {
+    return `${API_BASE}/api/download?source=${encodeURIComponent(sourceKey)}&dates=${encodeURIComponent(dates)}`;
+  }
+  const base = `${API_BASE}/api/download/region?source=${encodeURIComponent(sourceKey)}&dates=${encodeURIComponent(dates)}`;
+  if (sel.layer === 'custom') {
+    return `${base}&bbox=${sel.bbox.join(',')}`;
+  }
+  return `${base}&region_layer=${sel.layer}&region_ids=${sel.ids.join(',')}`;
 }
 
 function setDownloadLoading(loading) {
@@ -937,6 +956,290 @@ async function handleDownload() {
     showDownloadError(`Download failed: ${err.message}`);
   } finally {
     setDownloadLoading(false);
+  }
+}
+
+// ── Region filter panel ──────────────────────────────────────────────────────
+
+function _buildRegionLabel() {
+  const sel = state.selectedRegions;
+  if (!sel) return '';
+  if (sel.layer === 'states' && sel.ids && sel.ids.length > 0 && state.regionCatalog) {
+    const names = sel.ids.map(id => {
+      const s = state.regionCatalog.states.find(st => st.id === id);
+      return s ? s.name : id;
+    });
+    return ` → ${names.join(', ')}`;
+  }
+  if (sel.layer === 'iso' && sel.ids && sel.ids.length > 0 && state.regionCatalog) {
+    const zone = state.regionCatalog.iso.find(z => z.id === sel.ids[0]);
+    return ` → ${zone ? zone.name : sel.ids[0]}`;
+  }
+  if (sel.layer === 'custom' && sel.bbox) {
+    const [latMax, lonMin, latMin, lonMax] = sel.bbox;
+    return ` → Custom (${latMin}°–${latMax}° N, ${lonMin}°–${lonMax}° W)`;
+  }
+  return '';
+}
+
+async function loadRegionCatalogOnce() {
+  if (state.regionCatalog) return;
+  try {
+    state.regionCatalog = await fetchJSON('/api/regions');
+  } catch (err) {
+    console.warn('[region] Failed to load region catalog:', err);
+    state.regionCatalog = { states: [], iso: [] };
+  }
+}
+
+function renderRegionPanelOnce() {
+  if (state.regionPanelRendered) {
+    updateRegionPanel();
+    return;
+  }
+  state.regionPanelRendered = true;
+
+  const details = document.createElement('details');
+  details.id = 'region-filter-panel';
+  details.className = 'region-filter-panel';
+
+  const summary = document.createElement('summary');
+  summary.className = 'region-filter-summary';
+  summary.textContent = 'Region Filter (optional)';
+  details.appendChild(summary);
+
+  const body = document.createElement('div');
+  body.className = 'region-filter-body';
+
+  // Tab bar
+  const tabBar = document.createElement('div');
+  tabBar.className = 'region-tab-bar';
+  ['states', 'iso', 'custom'].forEach((tab) => {
+    const btn = document.createElement('button');
+    btn.className = 'region-tab-btn' + (tab === 'states' ? ' active' : '');
+    btn.dataset.tab = tab;
+    btn.textContent = tab === 'states' ? 'US States' : tab === 'iso' ? 'ISO Zones' : 'Custom Bbox';
+    btn.addEventListener('click', () => {
+      state.regionActiveTab = tab;
+      state.selectedRegions = null;
+      tabBar.querySelectorAll('.region-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+      renderActiveTabContent(tabContent);
+      updateDownloadBar();
+    });
+    tabBar.appendChild(btn);
+  });
+  body.appendChild(tabBar);
+
+  const tabContent = document.createElement('div');
+  tabContent.id = 'region-tab-content';
+  body.appendChild(tabContent);
+
+  details.appendChild(body);
+  els.step3Controls.appendChild(details);
+
+  details.addEventListener('toggle', () => {
+    if (details.open) loadRegionCatalogOnce().then(() => renderActiveTabContent(tabContent));
+  });
+
+  updateRegionPanel();
+}
+
+function renderActiveTabContent(container) {
+  container.innerHTML = '';
+  const tab = state.regionActiveTab;
+
+  if (tab === 'states') {
+    renderStatesTab(container);
+  } else if (tab === 'iso') {
+    renderIsoTab(container);
+  } else {
+    renderCustomTab(container);
+  }
+}
+
+function renderStatesTab(container) {
+  const cat = state.regionCatalog;
+  if (!cat || cat.states.length === 0) {
+    container.textContent = 'Loading states…';
+    loadRegionCatalogOnce().then(() => { container.innerHTML = ''; renderStatesTab(container); });
+    return;
+  }
+  const grid = document.createElement('div');
+  grid.className = 'region-states-grid';
+
+  const noneBtn = document.createElement('button');
+  noneBtn.className = 'region-state-btn' + (!state.selectedRegions ? ' active' : '');
+  noneBtn.textContent = 'None (full data)';
+  noneBtn.addEventListener('click', () => {
+    state.selectedRegions = null;
+    grid.querySelectorAll('.region-state-btn').forEach(b => b.classList.remove('active'));
+    noneBtn.classList.add('active');
+    updateDownloadBar();
+  });
+  grid.appendChild(noneBtn);
+
+  cat.states.forEach(({ id, name }) => {
+    const btn = document.createElement('button');
+    const isSelected = state.selectedRegions?.layer === 'states' && state.selectedRegions?.ids?.includes(id);
+    btn.className = 'region-state-btn' + (isSelected ? ' active' : '');
+    btn.textContent = id;
+    btn.title = name;
+    btn.dataset.id = id;
+    btn.addEventListener('click', () => {
+      let cur = state.selectedRegions;
+      if (cur?.layer !== 'states') cur = { layer: 'states', ids: [] };
+      const idx = cur.ids.indexOf(id);
+      if (idx >= 0) cur.ids.splice(idx, 1);
+      else cur.ids.push(id);
+      state.selectedRegions = cur.ids.length > 0 ? cur : null;
+      // update active class
+      noneBtn.classList.toggle('active', !state.selectedRegions);
+      grid.querySelectorAll('.region-state-btn[data-id]').forEach(b => {
+        b.classList.toggle('active', !!state.selectedRegions?.ids?.includes(b.dataset.id));
+      });
+      // 413 guard
+      checkRegionSdkHint(container);
+      updateDownloadBar();
+    });
+    grid.appendChild(btn);
+  });
+  container.appendChild(grid);
+  checkRegionSdkHint(container);
+}
+
+function renderIsoTab(container) {
+  const cat = state.regionCatalog;
+  if (!cat) {
+    container.textContent = 'Loading…';
+    return;
+  }
+  if (cat.iso.length === 0) {
+    container.textContent = 'No ISO zones available (shapefile may not be loaded).';
+    return;
+  }
+  const list = document.createElement('div');
+  list.className = 'region-iso-list';
+
+  const noneBtn = document.createElement('button');
+  noneBtn.className = 'region-iso-btn' + (!state.selectedRegions ? ' active' : '');
+  noneBtn.textContent = 'None (full data)';
+  noneBtn.addEventListener('click', () => {
+    state.selectedRegions = null;
+    list.querySelectorAll('.region-iso-btn').forEach(b => b.classList.remove('active'));
+    noneBtn.classList.add('active');
+    updateDownloadBar();
+  });
+  list.appendChild(noneBtn);
+
+  cat.iso.forEach(({ id, name }) => {
+    const btn = document.createElement('button');
+    const isSelected = state.selectedRegions?.layer === 'iso' && state.selectedRegions?.ids?.[0] === id;
+    btn.className = 'region-iso-btn' + (isSelected ? ' active' : '');
+    btn.textContent = name;
+    btn.addEventListener('click', () => {
+      state.selectedRegions = { layer: 'iso', ids: [id] };
+      list.querySelectorAll('.region-iso-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      updateDownloadBar();
+    });
+    list.appendChild(btn);
+  });
+  container.appendChild(list);
+}
+
+function renderCustomTab(container) {
+  const form = document.createElement('div');
+  form.className = 'region-custom-form';
+
+  const fields = [
+    { id: 'bbox-north', label: 'North lat', placeholder: 'e.g. 37.0' },
+    { id: 'bbox-south', label: 'South lat', placeholder: 'e.g. 25.8' },
+    { id: 'bbox-west',  label: 'West lon',  placeholder: 'e.g. -106.6' },
+    { id: 'bbox-east',  label: 'East lon',  placeholder: 'e.g. -93.5' },
+  ];
+
+  const inputs = {};
+  const errEl = document.createElement('div');
+  errEl.className = 'region-custom-error';
+
+  fields.forEach(({ id, label, placeholder }) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'region-custom-field';
+    const lbl = document.createElement('label');
+    lbl.textContent = label;
+    lbl.htmlFor = id;
+    const inp = document.createElement('input');
+    inp.type = 'number';
+    inp.step = 'any';
+    inp.id = id;
+    inp.className = 'region-custom-input';
+    inp.placeholder = placeholder;
+    inputs[id] = inp;
+    wrap.appendChild(lbl);
+    wrap.appendChild(inp);
+    form.appendChild(wrap);
+  });
+
+  const applyBtn = document.createElement('button');
+  applyBtn.className = 'region-apply-btn';
+  applyBtn.textContent = 'Apply';
+  applyBtn.addEventListener('click', () => {
+    errEl.textContent = '';
+    const north = parseFloat(inputs['bbox-north'].value);
+    const south = parseFloat(inputs['bbox-south'].value);
+    const west  = parseFloat(inputs['bbox-west'].value);
+    const east  = parseFloat(inputs['bbox-east'].value);
+    if ([north, south, west, east].some(isNaN)) { errEl.textContent = 'All 4 fields required.'; return; }
+    if (north <= south) { errEl.textContent = 'North must be greater than South.'; return; }
+    if (east <= west) { errEl.textContent = 'East must be greater than West.'; return; }
+    if (north > 90 || south < -90) { errEl.textContent = 'Latitude must be between -90 and 90.'; return; }
+    if (east > 180 || west < -180) { errEl.textContent = 'Longitude must be between -180 and 180.'; return; }
+    state.selectedRegions = { layer: 'custom', bbox: [north, west, south, east] };
+    updateDownloadBar();
+  });
+  form.appendChild(applyBtn);
+  form.appendChild(errEl);
+  container.appendChild(form);
+}
+
+function checkRegionSdkHint(container) {
+  const existing = container.querySelector('.region-sdk-hint');
+  if (existing) existing.remove();
+  const sel = state.selectedRegions;
+  if (!sel || sel.layer !== 'states') return;
+  const src = state.selectedSource;
+  const typ = state.selectedType;
+  if (src !== 'hrrr' || typ !== 'archive') return;
+  if (sel.ids && state.regionCatalog) {
+    try {
+      const bboxes = sel.ids.map(id => {
+        const s = state.regionCatalog.states.find(st => st.id === id);
+        return s ? s.bbox : null;
+      }).filter(Boolean);
+      if (bboxes.length > 0) {
+        const latMax = Math.max(...bboxes.map(b => b[0]));
+        const lonMin = Math.min(...bboxes.map(b => b[1]));
+        const latMin = Math.min(...bboxes.map(b => b[2]));
+        const lonMax = Math.max(...bboxes.map(b => b[3]));
+        const area = (latMax - latMin) * (lonMax - lonMin);
+        if (area >= 2380) {
+          const hint = document.createElement('div');
+          hint.className = 'region-sdk-hint';
+          hint.textContent = 'CONUS-scale + HRRR archive exceeds server memory. Use the Python SDK: client.hrrr.download_region(months=[...], bbox=(...))';
+          container.appendChild(hint);
+        }
+      }
+    } catch {}
+  }
+}
+
+function updateRegionPanel() {
+  const panel = document.getElementById('region-filter-panel');
+  if (!panel) return;
+  const hasSelection = state.selectedDates.size > 0;
+  panel.classList.toggle('hidden', !hasSelection);
+  if (!hasSelection) {
+    state.selectedRegions = null;
   }
 }
 

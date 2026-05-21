@@ -89,6 +89,35 @@ class NOAAClient:
 
         return paths
 
+    def download_region(
+        self,
+        cycles: "list[str]",
+        *,
+        region_ids: "list[str] | None" = None,
+        region_layer: "str | None" = None,
+        bbox: "tuple | None" = None,
+        dest: str = ".",
+    ) -> "list[Path]":
+        """Download NOAA/GFS forecast PWW files cropped to a region or bbox."""
+        from ..utils import validate_region_args
+        validate_region_args(region_ids, region_layer, bbox)
+        if not cycles:
+            return []
+        dates_param = ",".join(cycles)
+        source = "noaa_forecast_recent"
+        filename = "noaa_region_bundle.zip" if len(cycles) > 1 else f"noaa_{cycles[0]}_region.pww"
+        if bbox is not None:
+            bbox_str = ",".join(str(x) for x in bbox)
+            return [self._client._download("/api/download/region", dest_dir=dest,
+                                           filename=filename, source=source,
+                                           dates=dates_param, bbox=bbox_str)]
+        else:
+            return [self._client._download("/api/download/region", dest_dir=dest,
+                                           filename=filename, source=source,
+                                           dates=dates_param,
+                                           region_layer=region_layer,
+                                           region_ids=",".join(region_ids))]
+
     def download_latest(self, dest: str = ".") -> Path:
         """Download the most recent NOAA/GFS forecast cycle.
 

@@ -162,6 +162,81 @@ class HRRRClient:
 
         return paths
 
+    def download_region(
+        self,
+        *,
+        months: "list[str] | None" = None,
+        cycles: "list[str] | None" = None,
+        region_ids: "list[str] | None" = None,
+        region_layer: "str | None" = None,
+        bbox: "tuple | None" = None,
+        dest: str = ".",
+    ) -> "list[Path]":
+        """Download HRRR data cropped to a region (states/iso) or bbox.
+
+        Exactly one of months/cycles must be provided; exactly one of region_ids/bbox.
+        Large HRRR-archive + bbox requests are cropped locally (SDK-side) to avoid 413.
+        """
+        from ..utils import validate_region_args
+        validate_region_args(region_ids, region_layer, bbox)
+        if months is not None and cycles is not None:
+            raise ValueError("Provide exactly one of months or cycles, not both")
+        if months is None and cycles is None:
+            raise ValueError("Provide months (history) or cycles (forecast)")
+
+        is_history = months is not None
+        source = "hrrr_history" if is_history else "hrrr_forecast"
+        date_list = months if is_history else cycles
+
+        if not date_list:
+            return []
+
+        # Large bbox + HRRR history: SDK local crop
+        if is_history and bbox is not None:
+            lat_max, lon_min, lat_min, lon_max = bbox
+            area = (lat_max - lat_min) * (lon_max - lon_min)
+            if area >= 2380:
+                return self._local_crop(months, bbox, dest)
+
+        dates_param = ",".join(date_list)
+        if bbox is not None:
+            bbox_str = ",".join(str(x) for x in bbox)
+            filename = f"{source}_region_bundle.zip" if len(date_list) > 1 else f"{source}_{date_list[0]}_region.pww"
+            return [self._client._download("/api/download/region", dest_dir=dest,
+                                           filename=filename, source=source,
+                                           dates=dates_param, bbox=bbox_str)]
+        else:
+            ids_str = ",".join(region_ids)
+            filename = f"{source}_region_bundle.zip" if len(date_list) > 1 else f"{source}_{date_list[0]}_region.pww"
+            return [self._client._download("/api/download/region", dest_dir=dest,
+                                           filename=filename, source=source,
+                                           dates=dates_param,
+                                           region_layer=region_layer,
+                                           region_ids=ids_str)]
+
+    def _local_crop(self, months: "list[str]", bbox: tuple, dest: str) -> "list[Path]":
+        """Fallback: download full HRRR monthly archives and crop locally."""
+        import io as _io
+        import zipfile
+        from .. import pww_io
+        out = []
+        for m in months:
+            paths = self.download_history([m], dest=dest)
+            for p in paths:
+                raw = p.read_bytes()
+                if p.suffix.lower() == ".zip":
+                    with zipfile.ZipFile(_io.BytesIO(raw)) as zf:
+                        pww_names = [n for n in zf.namelist() if n.lower().endswith(".pww")]
+                        if not pww_names:
+                            continue
+                        raw = zf.read(pww_names[0])
+                h, s, a = pww_io.read_pww(raw)
+                h, s, a = pww_io.crop_to_bbox(h, s, a, bbox)
+                cropped_path = p.with_name(p.stem + "_region.pww")
+                cropped_path.write_bytes(pww_io.write_pww(h, s, a))
+                out.append(cropped_path)
+        return out
+
     def download_latest_forecast(self, dest: str = ".") -> Path:
         """Download the most recent HRRR forecast cycle.
 

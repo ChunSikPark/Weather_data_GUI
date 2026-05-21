@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 from fastapi import HTTPException
+from googleapiclient.http import MediaIoBaseDownload
 
 
 # Source identifier -> (catalog key, key field name on the catalog entry)
@@ -156,3 +157,59 @@ def parse_dates_param(dates: str | None) -> list[str]:
     if not keys:
         raise HTTPException(status_code=400, detail="No valid dates provided")
     return keys
+
+
+# ---------------------------------------------------------------------------
+# Region-crop helpers (in-memory PWW pipeline)
+# ---------------------------------------------------------------------------
+
+def get_file_id(source: str, date_key: str, catalog: dict) -> str:
+    section = _resolve_section(source, catalog)
+    entry = (section.get("file_ids") or {}).get(date_key)
+    if not entry or not entry.get("id"):
+        raise HTTPException(status_code=404, detail=f"No file ID for {source} {date_key}")
+    return entry["id"]
+
+
+def fetch_drive_bytes(file_id: str) -> bytes:
+    import catalog as _cat
+    service = _cat.DriveClient()._get_service()
+    request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
+    buf = io.BytesIO()
+    dl = MediaIoBaseDownload(buf, request, chunksize=8 * 1024 * 1024)
+    done = False
+    while not done:
+        _, done = dl.next_chunk()
+    buf.seek(0)
+    return buf.read()
+
+
+def _unzip_pww(zip_bytes: bytes) -> bytes:
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        pww_names = [n for n in zf.namelist() if n.lower().endswith(".pww")]
+        if not pww_names:
+            raise HTTPException(status_code=502, detail="No .pww file found inside ZIP")
+        if len(pww_names) > 1:
+            print(f"[download] ZIP has {len(pww_names)} .pww files; using {pww_names[0]}", file=sys.stderr)
+        return zf.read(pww_names[0])
+
+
+def fetch_and_crop(source: str, date_key: str, bbox: tuple, catalog: dict) -> bytes:
+    import pww_io
+    try:
+        file_id = get_file_id(source, date_key, catalog)
+        raw = fetch_drive_bytes(file_id)
+        if source.startswith("hrrr") or source.startswith("era5"):
+            raw = _unzip_pww(raw)
+        header, stations, arr = pww_io.read_pww(raw)
+        del raw
+        header, stations, arr = pww_io.crop_to_bbox(header, stations, arr, bbox)
+        return pww_io.write_pww(header, stations, arr)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Key error: {exc}")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Processing failed: {exc}")

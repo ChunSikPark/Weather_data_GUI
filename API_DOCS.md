@@ -202,3 +202,58 @@ client = WeatherClient(base_url="http://localhost:8000")
 | `noaa_forecast` | NOAA/GFS Forecast | North America | 0.25° | Every 6 h (384-h horizon) |
 
 All files use the **PWW binary format** (Team Overbye custom weather data format).
+
+---
+
+### Region Catalog
+
+Returns the catalog of supported region selectors (US states + ISO/RTO zones from shapefile).
+
+```
+GET /api/regions
+```
+
+**Response**
+```json
+{
+  "states": [
+    { "id": "TX", "name": "Texas", "layer": "states", "bbox": [36.5, -106.6, 25.8, -93.5] }
+  ],
+  "iso": [
+    { "id": "ERCOT", "name": "ERCOT", "layer": "iso", "bbox": [36.5, -106.6, 25.8, -93.5] }
+  ]
+}
+```
+
+Bbox tuple is `(lat_max, lon_min, lat_min, lon_max)` — CDS / PWW convention (N, W, S, E).
+
+---
+
+### Download Files Cropped to a Region
+
+Streams one PWW file (single date) or a ZIP of PWW files (multi-date), each cropped to a region's bounding box.
+
+```
+GET /api/download/region?source=...&dates=...&region_layer=...&region_ids=...
+GET /api/download/region?source=...&dates=...&bbox=lat_max,lon_min,lat_min,lon_max
+```
+
+**Query params**
+| Name | Required | Notes |
+|------|----------|-------|
+| `source` | yes | Same source identifiers as `/api/download` |
+| `dates` | yes | CSV of date keys |
+| `region_layer` | when using `region_ids` | `"states"` or `"iso"` |
+| `region_ids` | one of two | CSV of region IDs (states multi-select; iso single-select) |
+| `bbox` | one of two | `lat_max,lon_min,lat_min,lon_max` (4 floats, CSV) |
+
+Exactly one of `region_ids` or `bbox` must be provided.
+
+**Errors**
+- `400` — both/neither of `region_ids`/`bbox`; invalid bbox; unknown region id
+- `413` — area exceeds server memory limit for HRRR monthly archives (>= 2380 sq-deg). Response body includes `sdk_hint` pointing at `client.hrrr.download_region(..., bbox=(...))` which crops locally.
+- `502` — upstream Drive fetch or PWW processing failed
+
+**Response**
+- Single date: `application/octet-stream` (.pww), `Content-Disposition: attachment; filename="{source}_{date}_region.pww"`
+- Multi-date: `application/zip` (`ZIP_STORED`), one `.pww` per date.

@@ -108,3 +108,32 @@ class ERA5Client:
             paths.append(path)
 
         return paths
+
+    def download_region(
+        self,
+        quarters: "list[str]",
+        *,
+        region_ids: "list[str] | None" = None,
+        region_layer: "str | None" = None,
+        bbox: "tuple | None" = None,
+        dest: str = ".",
+    ) -> "list[Path]":
+        """Download ERA5 quarterly data cropped to a region or bbox."""
+        from ..utils import validate_region_args
+        validate_region_args(region_ids, region_layer, bbox)
+        if not quarters:
+            return []
+        source = "era5_na"
+        dates_param = ",".join(quarters)
+        filename = "era5_region_bundle.zip" if len(quarters) > 1 else f"era5_{quarters[0]}_region.pww"
+        if bbox is not None:
+            bbox_str = ",".join(str(x) for x in bbox)
+            return [self._client._download("/api/download/region", dest_dir=dest,
+                                           filename=filename, source=source,
+                                           dates=dates_param, bbox=bbox_str)]
+        else:
+            return [self._client._download("/api/download/region", dest_dir=dest,
+                                           filename=filename, source=source,
+                                           dates=dates_param,
+                                           region_layer=region_layer,
+                                           region_ids=",".join(region_ids))]

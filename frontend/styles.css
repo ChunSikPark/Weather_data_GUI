@@ -960,6 +960,107 @@ button {
   padding: 24px 0;
 }
 
+/* ── Region filter panel ────────────────────────────────────────────── */
+.region-filter-panel {
+  margin-top: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.region-filter-summary {
+  padding: 12px 16px;
+  cursor: pointer;
+  font-family: var(--font-data);
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  user-select: none;
+}
+.region-filter-summary:hover { color: var(--accent); }
+.region-filter-body { padding: 0 12px 12px; }
+
+.region-tab-bar { display: flex; gap: 6px; margin-bottom: 12px; }
+.region-tab-btn {
+  padding: 5px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-data);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.region-tab-btn.active, .region-tab-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+/* States grid */
+.region-states-grid {
+  display: flex; flex-wrap: wrap; gap: 6px; max-height: 220px; overflow-y: auto;
+}
+.region-state-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-data);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: all 0.12s;
+  min-width: 44px;
+  text-align: center;
+}
+.region-state-btn:hover { border-color: var(--accent); color: var(--accent); }
+.region-state-btn.active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ISO list */
+.region-iso-list { display: flex; flex-direction: column; gap: 6px; }
+.region-iso-btn {
+  padding: 8px 14px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: transparent; color: var(--text-primary); font-family: var(--font-data);
+  font-size: 0.82rem; cursor: pointer; text-align: left; transition: all 0.12s;
+}
+.region-iso-btn:hover { border-color: var(--accent); color: var(--accent); }
+.region-iso-btn.active {
+  background: var(--accent-dim);
+  border-color: var(--accent); color: var(--accent);
+}
+
+/* Custom bbox form */
+.region-custom-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.region-custom-field { display: flex; flex-direction: column; gap: 4px; }
+.region-custom-field label { font-family: var(--font-data); font-size: 0.75rem; color: var(--text-secondary); }
+.region-custom-input {
+  width: 110px; padding: 6px 8px;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: var(--surface); color: var(--text-primary);
+  font-family: var(--font-data); font-size: 0.82rem;
+}
+.region-custom-input:focus { outline: none; border-color: var(--accent); }
+.region-apply-btn {
+  padding: 6px 16px; border: 1px solid var(--accent); border-radius: var(--radius);
+  background: var(--accent-dim); color: var(--accent);
+  font-family: var(--font-data); font-size: 0.82rem; cursor: pointer; transition: all 0.12s;
+}
+.region-apply-btn:hover { background: var(--accent); color: var(--bg); }
+
+.region-custom-error { width: 100%; color: var(--error); font-size: 0.78rem; font-family: var(--font-data); }
+.region-sdk-hint {
+  margin-top: 8px; padding: 8px 12px;
+  border: 1px solid var(--warning); border-radius: var(--radius);
+  background: rgba(245,158,11,0.08); color: var(--warning);
+  font-family: var(--font-data); font-size: 0.78rem; width: 100%;
+}
+
 /* ── Responsive fine-tuning for large screens ───────────────── */
 @media (min-width: 1400px) {
   .card-grid {

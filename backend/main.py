@@ -8,10 +8,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 
 import catalog as catalog_module
 import download as download_module
+import regions as regions_module
 import status as status_module
 
 
@@ -51,6 +52,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serialize region-crop work so concurrent requests can't OOM the Railway worker.
+_region_sem = asyncio.Semaphore(1)
 
 
 @app.get("/api/health")
@@ -158,3 +162,97 @@ async def download(
         media_type="application/zip",
         headers=headers,
     )
+
+
+@app.get("/api/regions")
+async def get_regions() -> JSONResponse:
+    return JSONResponse(regions_module._build_payload())
+
+
+@app.get("/api/download/region")
+async def download_region(
+    source: str = Query(...),
+    dates: str = Query(...),
+    region_layer: str | None = Query(None),
+    region_ids: str | None = Query(None),
+    bbox: str | None = Query(None),
+):
+    have_ids = bool(region_ids and region_ids.strip())
+    have_bbox = bool(bbox and bbox.strip())
+    if have_ids and have_bbox:
+        raise HTTPException(status_code=400, detail="Provide exactly one of region_ids or bbox, not both")
+    if not have_ids and not have_bbox:
+        raise HTTPException(status_code=400, detail="Provide region_ids or bbox")
+
+    if have_ids:
+        if region_layer not in ("states", "iso"):
+            raise HTTPException(status_code=400, detail="region_layer must be 'states' or 'iso' when region_ids is given")
+        ids = [x.strip() for x in region_ids.split(",") if x.strip()]
+        try:
+            bboxes = [regions_module.get_bbox(region_layer, rid) for rid in ids]
+            resolved = regions_module.union_bbox(bboxes)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    else:
+        try:
+            parts = [float(x) for x in bbox.split(",")]
+            if len(parts) != 4:
+                raise ValueError("bbox must have exactly 4 floats: lat_max,lon_min,lat_min,lon_max")
+            lat_max, lon_min, lat_min, lon_max = parts
+            if not (-90 <= lat_min < lat_max <= 90 and -180 <= lon_min < lon_max <= 180):
+                raise ValueError("bbox out of range or inverted (lat_max > lat_min, lon_max > lon_min required)")
+            resolved = (lat_max, lon_min, lat_min, lon_max)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid bbox: {exc}")
+
+    area = (resolved[0] - resolved[2]) * (resolved[3] - resolved[1])
+    if area >= 2380 and source in ("hrrr_history", "hrrr_history_archive"):
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "detail": "Requested area exceeds server memory limit for HRRR monthly archives.",
+                "sdk_hint": f"Use: client.hrrr.download_region(months=[...], bbox={resolved}, dest='./data/')",
+            },
+        )
+
+    date_keys = download_module.parse_dates_param(dates)
+    loop = asyncio.get_running_loop()
+    catalog_data = await loop.run_in_executor(None, catalog_module.get_catalog)
+
+    async with _region_sem:
+        if len(date_keys) == 1:
+            pww_bytes = await loop.run_in_executor(
+                None, download_module.fetch_and_crop, source, date_keys[0], resolved, catalog_data
+            )
+            filename = f"{source}_{date_keys[0]}_region.pww"
+            return Response(
+                content=pww_bytes,
+                media_type="application/octet-stream",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+        filename = f"{source}_region_bundle_{len(date_keys)}_files.zip"
+
+        async def _stream_zip():
+            import io
+            import zipfile
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+                for key in date_keys:
+                    try:
+                        pww_bytes = await loop.run_in_executor(
+                            None, download_module.fetch_and_crop, source, key, resolved, catalog_data
+                        )
+                        zf.writestr(f"{source}_{key}_region.pww", pww_bytes)
+                        del pww_bytes
+                    except Exception as exc:
+                        print(f"[region] skip {key}: {exc}", file=sys.stderr)
+            buf.seek(0)
+            for chunk in download_module.iter_zip_chunks(buf):
+                yield chunk
+
+        return StreamingResponse(
+            _stream_zip(),
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )

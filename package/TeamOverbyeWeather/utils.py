@@ -94,3 +94,15 @@ def quarter_to_source_key(region: str) -> str:
             f"Unknown region {region!r}. Valid options: {list(mapping.keys())}."
         )
     return mapping[region]
+
+
+def validate_region_args(region_ids, region_layer, bbox):
+    """Validate that exactly one of (region_ids, bbox) is provided and layer is valid."""
+    have_ids = region_ids is not None
+    have_bbox = bbox is not None
+    if have_ids and have_bbox:
+        raise ValueError("Provide exactly one of region_ids or bbox, not both")
+    if not have_ids and not have_bbox:
+        raise ValueError("Provide region_ids or bbox")
+    if have_ids and region_layer not in ("states", "iso"):
+        raise ValueError("region_layer must be 'states' or 'iso' when region_ids is given")
