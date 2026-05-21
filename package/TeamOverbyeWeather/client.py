@@ -19,7 +19,7 @@ class WeatherClient:
         base_url: Base URL of the weather data API.
     """
 
-    def __init__(self, base_url: str = "https://api.teamoverbye.tamu.edu") -> None:
+    def __init__(self, base_url: str = "https://weatherdatagui-production.up.railway.app") -> None:
         self._base_url = base_url.rstrip("/")
         self.era5 = ERA5Client(self)
         self.hrrr = HRRRClient(self)
