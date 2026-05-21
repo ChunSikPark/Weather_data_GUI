@@ -1,10 +1,5 @@
-"""Region catalog: US states (hardcoded bboxes) and ISO zones (pyshp)."""
+"""Region catalog: US states and ISO zones — all bboxes hardcoded, no shapefile loading."""
 from __future__ import annotations
-
-import pathlib
-import sys
-
-import shapefile  # pyshp
 
 # (lat_max, lon_min, lat_min, lon_max) — same as PWW crop convention (N, W, S, E)
 _STATE_BBOXES: dict[str, tuple[float, float, float, float]] = {
@@ -77,40 +72,33 @@ _STATE_NAMES: dict[str, str] = {
     "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming",
 }
 
-_ISO_PATH = pathlib.Path(r"D:\Research_Projects\Inputs\Shape_Files\ISO_REGIONS\ISO_Regions_cleaned.shp")
+# ISO/RTO zones — bboxes extracted from ISO_Regions_cleaned.shp and reprojected
+# from Web Mercator (EPSG:3857) to WGS84 (EPSG:4326) on 2026-05-21.
+_ISO_BBOXES: dict[str, tuple[float, float, float, float]] = {
+    "CAISO":     (41.2391, -124.3636, 32.5348, -114.1383),
+    "ERCOT":     (35.1258, -106.1710, 25.8379,  -93.6435),
+    "ISO-NE":    (47.4598,  -73.5253, 41.0410,  -66.9513),
+    "MISO":      (49.3666, -106.7718, 29.0422,  -82.4196),
+    "Northwest": (48.9998, -124.7619, 37.2517, -104.0560),
+    "NYISO":     (45.0107,  -79.7957, 40.5770,  -71.8603),
+    "PJM":       (42.5280,  -89.9731, 35.4977,  -73.9234),
+    "Southeast": (38.4412,  -93.3174, 24.5480,  -75.5246),
+    "Southwest": (44.0807, -115.5100, 30.9243, -102.0420),
+    "SPP":       (49.0000, -112.3933, 32.0003,  -92.4759),
+}
 
-
-def _load_iso_shapefile() -> list[dict]:
-    prj = _ISO_PATH.with_suffix(".prj").read_text(errors="ignore").strip()
-    if prj.startswith("PROJCS[") or ("WGS_1984" not in prj and "WGS 84" not in prj):
-        raise RuntimeError("ISO shapefile must be WGS84 geographic (EPSG:4326); re-export if needed")
-    out = []
-    with shapefile.Reader(str(_ISO_PATH)) as sf:
-        fields = [f[0] for f in sf.fields[1:]]
-        name_idx = next((i for i, f in enumerate(fields) if f.upper() in ("NAME", "ZONE", "ISO", "RTO")), 0)
-        for i, sr in enumerate(sf.shapeRecords()):
-            pts = sr.shape.points
-            if not pts:
-                continue
-            lons = [p[0] for p in pts]
-            lats = [p[1] for p in pts]
-            # Sanity: must be in WGS84 degree range
-            if not (-90 <= min(lats) and max(lats) <= 90 and -180 <= min(lons) and max(lons) <= 180):
-                raise RuntimeError("ISO shapefile coordinates out of WGS84 range — likely projected CRS")
-            raw_name = str(sr.record[name_idx]).strip() or f"ISO_{i}"
-            rid = raw_name.upper().replace(" ", "_")
-            out.append({
-                "id": rid, "name": raw_name, "layer": "iso",
-                "bbox": (max(lats), min(lons), min(lats), max(lons)),
-            })
-    return out
-
-
-try:
-    _ISO_CATALOG: list[dict] = _load_iso_shapefile()
-except Exception as e:
-    print(f"[regions] ISO shapefile load failed: {e}", file=sys.stderr)
-    _ISO_CATALOG = []
+_ISO_NAMES: dict[str, str] = {
+    "CAISO":     "CAISO",
+    "ERCOT":     "ERCOT",
+    "ISO-NE":    "ISO New England",
+    "MISO":      "MISO",
+    "Northwest": "Northwest",
+    "NYISO":     "NYISO",
+    "PJM":       "PJM",
+    "Southeast": "Southeast",
+    "Southwest": "Southwest",
+    "SPP":       "SPP",
+}
 
 
 def list_regions(layer: str) -> list[dict]:
@@ -120,21 +108,29 @@ def list_regions(layer: str) -> list[dict]:
             for code, bbox in _STATE_BBOXES.items()
         ]
     if layer == "iso":
-        return [{"id": r["id"], "name": r["name"], "layer": "iso", "bbox": list(r["bbox"])} for r in _ISO_CATALOG]
+        return [
+            {"id": zone_id, "name": _ISO_NAMES[zone_id], "layer": "iso", "bbox": list(bbox)}
+            for zone_id, bbox in _ISO_BBOXES.items()
+        ]
     raise ValueError(f"Unknown layer {layer!r}. Valid: 'states', 'iso'")
 
 
 def get_bbox(layer: str, region_id: str) -> tuple:
-    rid = region_id.strip().upper()
     if layer == "states":
+        rid = region_id.strip().upper()
         if rid not in _STATE_BBOXES:
             raise ValueError(f"Unknown state '{region_id}'. Valid codes: {sorted(_STATE_BBOXES)}")
         return _STATE_BBOXES[rid]
     if layer == "iso":
-        for r in _ISO_CATALOG:
-            if r["id"] == rid:
-                return tuple(r["bbox"])
-        raise ValueError(f"Unknown ISO region '{region_id}'")
+        rid = region_id.strip()
+        if rid in _ISO_BBOXES:
+            return _ISO_BBOXES[rid]
+        # case-insensitive fallback
+        rid_upper = rid.upper()
+        for key in _ISO_BBOXES:
+            if key.upper() == rid_upper:
+                return _ISO_BBOXES[key]
+        raise ValueError(f"Unknown ISO region '{region_id}'. Valid: {sorted(_ISO_BBOXES)}")
     raise ValueError(f"Unknown layer {layer!r}")
 
 
