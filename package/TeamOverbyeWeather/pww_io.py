@@ -33,8 +33,8 @@ def read_pww(data: bytes) -> tuple[dict, list, np.ndarray]:
     key1 = struct.unpack("<h", f.read(2))[0]
     key2 = struct.unpack("<h", f.read(2))[0]
     version = struct.unpack("<h", f.read(2))[0]
-    if version < 2:
-        raise ValueError("Not a PWW VERSION 2 file")
+    if version < 1:
+        raise ValueError(f"Unsupported PWW version {version}")
 
     date_min, date_max = struct.unpack("<dd", f.read(16))
     lat_min, lat_max, lon_min, lon_max = struct.unpack("<dddd", f.read(32))
@@ -43,8 +43,10 @@ def read_pww(data: bytes) -> tuple[dict, list, np.ndarray]:
     count, sample_sec, loc = struct.unpack("<iii", f.read(12))
     loc_fc, varcount = struct.unpack("<hh", f.read(4))
     var_codes = list(struct.unpack(f"<{varcount}h", f.read(varcount * 2)))
-    _bytecount = struct.unpack("<h", f.read(2))[0]
-    _valid_cnt = struct.unpack(f"<{varcount}i", f.read(varcount * 4))
+    # VERSION 2+ has a bytecount + valid_counts block; VERSION 1 goes straight to stations
+    if version >= 2:
+        _bytecount = struct.unpack("<h", f.read(2))[0]
+        _valid_cnt = struct.unpack(f"<{_bytecount}i", f.read(_bytecount * 4))
 
     stations = []
     for _ in range(loc):
