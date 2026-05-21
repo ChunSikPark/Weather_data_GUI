@@ -16,17 +16,21 @@ A weather data download portal for Texas A&M Team Overbye research. Users browse
 
 ```
 frontend/ (Cloudflare Pages)
-  ├ index.html       Step 1/2/3 picker UI
+  ├ index.html       Step 1/2/3 picker UI + region filter panel
   ├ main.js          State, API calls, render functions
   └ styles.css       "Scientific Dark" aesthetic (Bencium-inspired)
 
 backend/ (Railway, Docker)
   ├ main.py          FastAPI app, endpoints
   ├ catalog.py       Drive scanning, regex matching, 30-min cache
-  ├ download.py      ZIP bundling, source key lookup
+  ├ download.py      ZIP bundling, source key lookup, fetch_and_crop()
+  ├ pww_io.py        PWW VERSION 2 read/crop/write (numpy-based)
+  ├ regions.py       Region catalog: 51 state bboxes + ISO zones from shapefile
   └ status.py        Pipeline health
 
 package/TeamOverbyeWeather/  Python SDK (pip install TeamOverbyeWeather)
+  ├ pww_io.py        Copy of backend/pww_io.py for local crop
+  └ sources/         hrrr.py, noaa.py, era5.py — each has download_region()
 ```
 
 ## Critical: Google Drive folder IDs
@@ -93,10 +97,34 @@ Date key formats:
 | GET | `/api/catalog/refresh` | force rebuild (browser-friendly) |
 | POST | `/api/catalog/refresh` | force rebuild |
 | GET | `/api/download?source=...&dates=...` | single = 302 to Drive; multi = ZIP stream |
+| GET | `/api/regions` | region catalog: `{states:[{id,name,bbox},...], iso:[...]}` |
+| GET | `/api/download/region?source=...&dates=...&region_layer=...&region_ids=...` | fetch + crop to bbox; single=.pww, multi=ZIP |
 | GET | `/api/debug/folders` | resolved folder IDs the catalog is using |
 | GET | `/api/debug/folder?folder_id=...&limit=N` | raw filenames in a Drive folder |
 
 The two debug endpoints are gold for diagnosing "data not showing" issues — always use them before guessing.
+
+### `/api/download/region` params
+
+| Param | Required | Description |
+|---|---|---|
+| `source` | yes | Catalog source key (e.g. `noaa_forecast_recent`) |
+| `dates` | yes | Comma-separated date keys |
+| `region_layer` | yes | `states`, `iso`, or `custom` |
+| `region_ids` | one of | Comma-separated postal codes or ISO zone IDs |
+| `bbox` | one of | `lat_max,lon_min,lat_min,lon_max` floats (custom layer) |
+
+Returns 400 if both/neither of `region_ids`/`bbox` are given. Returns 413 with `{"sdk_hint":"..."}` if bbox area ≥ 2380 sq-deg and source is `hrrr_history` or `hrrr_history_archive` (CONUS-scale request — use SDK local crop instead).
+
+## Region crop system
+
+- **`backend/regions.py`**: 51-state bbox dict (hardcoded, keyed by 2-letter postal code) + ISO zones loaded from `D:\Research_Projects\Inputs\Shape_Files\ISO_REGIONS\ISO_Regions_cleaned.shp` via `pyshp`. Alaska clipped to `(71.4, -180.0, 51.2, -129.9)` to avoid antimeridian union issues.
+- **`backend/pww_io.py`**: `read_pww(bytes)`, `crop_to_bbox(header, stations, arr, bbox_tuple)`, `write_pww(header, stations, arr)`. Ported from `D:\Research_Projects\PWW\extract_region_pww.py`. Longitude axis descends (east→west), 255 = NaN sentinel. Always `.copy()` after slicing.
+- **ISO shapefile**: `.prj` is checked at startup. If it's a projected CRS (starts with `PROJCS[`) or lacks WGS84 datum, the module logs to stderr and `iso` returns `[]` — ISO tab shows empty list, no crash.
+- **Memory guard**: `asyncio.Semaphore(1)` on `/api/download/region` prevents concurrent crop ops on Railway's 512 MB container. CONUS-scale HRRR archive requests are blocked at 413 — use `client.hrrr.download_region()` which crops locally.
+- **SDK `download_region()`**: available on `HRRRClient`, `NOAAClient`, `ERA5Client`. HRRR archive + large bbox triggers `_local_crop()` (downloads per-month, unzips, crops with `pww_io` locally). `package/TeamOverbyeWeather/pww_io.py` is a copy of the backend module.
+- **Frontend region panel**: `<details>` element rendered once after first date is selected (in `renderRegionPanelOnce()`). Three tabs: States (button grid, multi-select), ISO Zones (single-select list), Custom (4 float inputs). `state.selectedRegions = {layer, ids?, bbox?}` drives `buildDownloadURL()`. Resets on source/type change.
+- **bbox format everywhere**: `(lat_max, lon_min, lat_min, lon_max)` — note lon comes before lat_min. This matches `extract_region_pww.py`'s `REGIONS` dict convention.
 
 ## Painful lessons (read these before debugging)
 
@@ -131,6 +159,7 @@ The two debug endpoints are gold for diagnosing "data not showing" issues — al
 - HRRR Current Year picker shows individual **days** (not months), because the daily folder has individual day ZIPs.
 - "Pipelines" status dots in the header poll `/api/status` every 5 minutes.
 - Multi-file downloads are bundled as a streaming ZIP (`ZIP_STORED`, no recompression).
+- **Region filter panel** appears below the date picker once at least one date is selected. Tabs: States (51 buttons, multi-select → union bbox), ISO Zones (single-select), Custom (4 inputs). Panel is hidden until dates are chosen; resets when source or type changes.
 
 ## Common workflows
 
