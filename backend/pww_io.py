@@ -1,10 +1,14 @@
-"""PWW VERSION 2 binary I/O — in-memory read, bbox crop, and write.
+"""PWW VERSION 1/2 binary I/O — read, bbox crop, and write.
 
-Ported from extract_region_pww.py for in-memory use (bytes in / bytes out).
+Ported from extract_region_pww.py.  Two entry points:
+  read_pww(data: bytes)  — in-memory (SDK / tests)
+  read_pww_file(path: str) — mmap-backed; file never fully loaded into RAM
 """
 from __future__ import annotations
 
 import io
+import mmap
+import os
 import struct
 
 import numpy as np
@@ -20,16 +24,12 @@ def _read_cstring(f) -> str:
     return buf.decode("ascii", errors="replace")
 
 
-def read_pww(data: bytes) -> tuple[dict, list, np.ndarray]:
-    """Parse a VERSION 2 PWW binary from bytes.
+def _parse_header_and_stations(f) -> tuple[dict, list, int, int, int]:
+    """Parse header + stations from a file-like object.
 
-    Returns
-    -------
-    header   : dict
-    stations : list of dicts  {lat, lon, elev, who, country, region}
-    arr      : np.ndarray uint8, shape (count, varcount, n_lat, n_lon)
+    Returns (header, stations, count, varcount, arr_offset) where
+    arr_offset is the byte position of the grid array in the stream.
     """
-    f = io.BytesIO(data)
     key1 = struct.unpack("<h", f.read(2))[0]
     key2 = struct.unpack("<h", f.read(2))[0]
     version = struct.unpack("<h", f.read(2))[0]
@@ -59,12 +59,7 @@ def read_pww(data: bytes) -> tuple[dict, list, np.ndarray]:
         stations.append(dict(lat=lat, lon=lon, elev=elev,
                              who=who, country=country, region=region))
 
-    n_lat = round((lat_max - lat_min) / 0.25) + 1
-    n_lon = round((lon_max - lon_min) / 0.25) + 1
-    nbytes = count * varcount * n_lat * n_lon
-    arr = np.frombuffer(f.read(nbytes), dtype=np.uint8) \
-            .reshape(count, varcount, n_lat, n_lon).copy()
-
+    arr_offset = f.tell()
     header = dict(
         key1=key1, key2=key2, version=version,
         date_min=date_min, date_max=date_max,
@@ -75,6 +70,41 @@ def read_pww(data: bytes) -> tuple[dict, list, np.ndarray]:
         loc=loc, loc_fc=loc_fc,
         varcount=varcount, var_codes=var_codes,
     )
+    return header, stations, count, varcount, arr_offset
+
+
+def read_pww(data: bytes) -> tuple[dict, list, np.ndarray]:
+    """Parse a PWW binary from bytes (VERSION 1 or 2)."""
+    f = io.BytesIO(data)
+    header, stations, count, varcount, arr_offset = _parse_header_and_stations(f)
+    lat_min, lat_max = header["lat_min"], header["lat_max"]
+    lon_min, lon_max = header["lon_min"], header["lon_max"]
+    n_lat = round((lat_max - lat_min) / 0.25) + 1
+    n_lon = round((lon_max - lon_min) / 0.25) + 1
+    nbytes = count * varcount * n_lat * n_lon
+    arr = np.frombuffer(data, dtype=np.uint8, offset=arr_offset, count=nbytes) \
+            .reshape(count, varcount, n_lat, n_lon).copy()
+    return header, stations, arr
+
+
+def read_pww_file(path: str) -> tuple[dict, list, np.ndarray]:
+    """Parse a PWW file using mmap — the file is never fully loaded into RAM.
+
+    Only the final cropped numpy array copy uses heap memory.
+    """
+    with open(path, "rb") as fh:
+        header, stations, count, varcount, arr_offset = _parse_header_and_stations(fh)
+        lat_min, lat_max = header["lat_min"], header["lat_max"]
+        lon_min, lon_max = header["lon_min"], header["lon_max"]
+        n_lat = round((lat_max - lat_min) / 0.25) + 1
+        n_lon = round((lon_max - lon_min) / 0.25) + 1
+        nbytes = count * varcount * n_lat * n_lon
+        mm = mmap.mmap(fh.fileno(), length=0, access=mmap.ACCESS_READ)
+        try:
+            arr = np.frombuffer(mm, dtype=np.uint8, offset=arr_offset, count=nbytes) \
+                    .reshape(count, varcount, n_lat, n_lon).copy()
+        finally:
+            mm.close()
     return header, stations, arr
 
 
