@@ -101,12 +101,12 @@ def crop_to_bbox(header: dict, stations: list, arr: np.ndarray, region: tuple) -
     r_lat_max, r_lon_min, r_lat_min, r_lon_max = region
 
     src_lat_min = header["lat_min"]
-    src_lon_max = header["lon_max"]
+    src_lon_min = header["lon_min"]
 
     lat_s = round((r_lat_min - src_lat_min) / 0.25)
     lat_e = round((r_lat_max - src_lat_min) / 0.25) + 1
-    lon_s = round((src_lon_max - r_lon_max) / 0.25)
-    lon_e = round((src_lon_max - r_lon_min) / 0.25) + 1
+    lon_s = round((r_lon_min - src_lon_min) / 0.25)
+    lon_e = round((r_lon_max - src_lon_min) / 0.25) + 1
 
     lat_s = max(0, lat_s); lat_e = min(arr.shape[2], lat_e)
     lon_s = max(0, lon_s); lon_e = min(arr.shape[3], lon_e)
@@ -115,8 +115,8 @@ def crop_to_bbox(header: dict, stations: list, arr: np.ndarray, region: tuple) -
 
     new_lat_min = src_lat_min + lat_s * 0.25
     new_lat_max = src_lat_min + (lat_e - 1) * 0.25
-    new_lon_max = src_lon_max - lon_s * 0.25
-    new_lon_min = src_lon_max - (lon_e - 1) * 0.25
+    new_lon_min = src_lon_min + lon_s * 0.25
+    new_lon_max = src_lon_min + (lon_e - 1) * 0.25
 
     eps = 1e-6
     new_stations = [
