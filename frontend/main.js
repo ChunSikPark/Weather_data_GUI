@@ -21,6 +21,7 @@ const els = {
   step1: $('step1'),
   step2: $('step2'),
   step3: $('step3'),
+  catalogLoading: $('catalog-loading'),
   step1Error: $('step1-error'),
   step1ErrorMsg: $('step1-error-msg'),
   sourceGrid: $('source-grid'),
@@ -217,12 +218,22 @@ async function fetchStatus() {
 }
 
 // ── Catalog fetch ────────────────────────────────────────────────────────────
+function setCatalogLoading(loading) {
+  els.catalogLoading.classList.toggle('hidden', !loading);
+  els.sourceGrid.querySelectorAll('.source-card').forEach((c) =>
+    c.classList.toggle('loading', loading)
+  );
+}
+
 async function fetchCatalog() {
+  setCatalogLoading(true);
   try {
     state.catalog = await fetchJSON('/api/catalog');
   } catch (err) {
     showStep1Error(`Failed to load catalog: ${err.message}`);
     state.catalog = null;
+  } finally {
+    setCatalogLoading(false);
   }
 }
 

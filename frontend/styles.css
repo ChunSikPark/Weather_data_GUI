@@ -270,6 +270,40 @@ button {
   letter-spacing: -0.02em;
 }
 
+/* ── Catalog Loading ────────────────────────────────────────── */
+.catalog-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  margin-bottom: 16px;
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: var(--text-secondary);
+  letter-spacing: 0.06em;
+}
+
+.catalog-loading.hidden {
+  display: none !important;
+}
+
+.catalog-loading-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.source-card.loading,
+.type-card.loading {
+  pointer-events: none;
+  opacity: 0.45;
+}
+
 /* ── Error ──────────────────────────────────────────────────── */
 .step-error {
   display: flex;
