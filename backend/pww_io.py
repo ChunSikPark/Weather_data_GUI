@@ -24,11 +24,12 @@ def _read_cstring(f) -> str:
     return buf.decode("ascii", errors="replace")
 
 
-def _parse_header_and_stations(f) -> tuple[dict, list, int, int, int]:
-    """Parse header + stations from a file-like object.
+def _parse_header_only(f) -> tuple[dict, int, int]:
+    """Parse fixed header fields from a file-like object.
 
-    Returns (header, stations, count, varcount, arr_offset) where
-    arr_offset is the byte position of the grid array in the stream.
+    Returns (header, count, varcount).  Does NOT read the station block.
+    The caller is responsible for locating the array (either via f.tell()
+    after reading stations, or by computing from the end of the file).
     """
     key1 = struct.unpack("<h", f.read(2))[0]
     key2 = struct.unpack("<h", f.read(2))[0]
@@ -48,18 +49,6 @@ def _parse_header_and_stations(f) -> tuple[dict, list, int, int, int]:
         _bytecount = struct.unpack("<h", f.read(2))[0]
         _valid_cnt = struct.unpack(f"<{_bytecount}i", f.read(_bytecount * 4))
 
-    stations = []
-    for _ in range(loc):
-        lat = struct.unpack("<d", f.read(8))[0]
-        lon = struct.unpack("<d", f.read(8))[0]
-        elev = struct.unpack("<h", f.read(2))[0]
-        who = _read_cstring(f)
-        country = _read_cstring(f)
-        region = _read_cstring(f)
-        stations.append(dict(lat=lat, lon=lon, elev=elev,
-                             who=who, country=country, region=region))
-
-    arr_offset = f.tell()
     header = dict(
         key1=key1, key2=key2, version=version,
         date_min=date_min, date_max=date_max,
@@ -70,18 +59,51 @@ def _parse_header_and_stations(f) -> tuple[dict, list, int, int, int]:
         loc=loc, loc_fc=loc_fc,
         varcount=varcount, var_codes=var_codes,
     )
-    return header, stations, count, varcount, arr_offset
+    return header, count, varcount
+
+
+def _read_stations(f, loc: int) -> list:
+    stations = []
+    for _ in range(loc):
+        lat = struct.unpack("<d", f.read(8))[0]
+        lon = struct.unpack("<d", f.read(8))[0]
+        elev = struct.unpack("<h", f.read(2))[0]
+        who = _read_cstring(f)
+        country = _read_cstring(f)
+        region = _read_cstring(f)
+        stations.append(dict(lat=lat, lon=lon, elev=elev,
+                             who=who, country=country, region=region))
+    return stations
+
+
+def _grid_shape(header: dict) -> tuple[int, int]:
+    n_lat = round((header["lat_max"] - header["lat_min"]) / 0.25) + 1
+    n_lon = round((header["lon_max"] - header["lon_min"]) / 0.25) + 1
+    return n_lat, n_lon
 
 
 def read_pww(data: bytes) -> tuple[dict, list, np.ndarray]:
-    """Parse a PWW binary from bytes (VERSION 1 or 2)."""
+    """Parse a PWW binary from bytes (VERSION 1 or 2).
+
+    VERSION 1 files (HRRR, NOAA) have a station block whose records are grid
+    metadata, not real lat/lon stations.  We skip that block entirely and
+    return stations=[] to avoid corrupting outputs with garbage coordinates.
+    """
     f = io.BytesIO(data)
-    header, stations, count, varcount, arr_offset = _parse_header_and_stations(f)
-    lat_min, lat_max = header["lat_min"], header["lat_max"]
-    lon_min, lon_max = header["lon_min"], header["lon_max"]
-    n_lat = round((lat_max - lat_min) / 0.25) + 1
-    n_lon = round((lon_max - lon_min) / 0.25) + 1
+    header, count, varcount = _parse_header_only(f)
+    n_lat, n_lon = _grid_shape(header)
     nbytes = count * varcount * n_lat * n_lon
+
+    if header["version"] >= 2:
+        # VERSION 2: station records have valid lat/lon — parse them
+        stations = _read_stations(f, header["loc"])
+        arr_offset = f.tell()
+    else:
+        # VERSION 1: station block is grid metadata, not real stations — skip it
+        stations = []
+        header["loc"] = 0
+        arr_offset = len(data) - nbytes
+
     arr = np.frombuffer(data, dtype=np.uint8, offset=arr_offset, count=nbytes) \
             .reshape(count, varcount, n_lat, n_lon).copy()
     return header, stations, arr
@@ -90,15 +112,22 @@ def read_pww(data: bytes) -> tuple[dict, list, np.ndarray]:
 def read_pww_file(path: str) -> tuple[dict, list, np.ndarray]:
     """Parse a PWW file using mmap — the file is never fully loaded into RAM.
 
-    Only the final cropped numpy array copy uses heap memory.
+    VERSION 1 station block is skipped (see read_pww docstring).
     """
+    file_size = os.path.getsize(path)
     with open(path, "rb") as fh:
-        header, stations, count, varcount, arr_offset = _parse_header_and_stations(fh)
-        lat_min, lat_max = header["lat_min"], header["lat_max"]
-        lon_min, lon_max = header["lon_min"], header["lon_max"]
-        n_lat = round((lat_max - lat_min) / 0.25) + 1
-        n_lon = round((lon_max - lon_min) / 0.25) + 1
+        header, count, varcount = _parse_header_only(fh)
+        n_lat, n_lon = _grid_shape(header)
         nbytes = count * varcount * n_lat * n_lon
+
+        if header["version"] >= 2:
+            stations = _read_stations(fh, header["loc"])
+            arr_offset = fh.tell()
+        else:
+            stations = []
+            header["loc"] = 0
+            arr_offset = file_size - nbytes
+
         mm = mmap.mmap(fh.fileno(), length=0, access=mmap.ACCESS_READ)
         try:
             arr = np.frombuffer(mm, dtype=np.uint8, offset=arr_offset, count=nbytes) \

@@ -1,6 +1,8 @@
-"""PWW VERSION 2 binary I/O — in-memory read, bbox crop, and write.
+"""PWW VERSION 1/2 binary I/O — in-memory read, bbox crop, and write.
 
-Ported from extract_region_pww.py for in-memory use (bytes in / bytes out).
+VERSION 1 (HRRR, NOAA): station block is grid metadata, not real lat/lon.
+  Stations are skipped on read; output writes loc=0.
+VERSION 2 (ERA5): station block has real lat/lon; filtered by crop bbox.
 """
 from __future__ import annotations
 
@@ -20,16 +22,7 @@ def _read_cstring(f) -> str:
     return buf.decode("ascii", errors="replace")
 
 
-def read_pww(data: bytes) -> tuple[dict, list, np.ndarray]:
-    """Parse a VERSION 2 PWW binary from bytes.
-
-    Returns
-    -------
-    header   : dict
-    stations : list of dicts  {lat, lon, elev, who, country, region}
-    arr      : np.ndarray uint8, shape (count, varcount, n_lat, n_lon)
-    """
-    f = io.BytesIO(data)
+def _parse_header_only(f) -> tuple[dict, int, int]:
     key1 = struct.unpack("<h", f.read(2))[0]
     key2 = struct.unpack("<h", f.read(2))[0]
     version = struct.unpack("<h", f.read(2))[0]
@@ -43,27 +36,9 @@ def read_pww(data: bytes) -> tuple[dict, list, np.ndarray]:
     count, sample_sec, loc = struct.unpack("<iii", f.read(12))
     loc_fc, varcount = struct.unpack("<hh", f.read(4))
     var_codes = list(struct.unpack(f"<{varcount}h", f.read(varcount * 2)))
-    # VERSION 2+ has a bytecount + valid_counts block; VERSION 1 goes straight to stations
     if version >= 2:
         _bytecount = struct.unpack("<h", f.read(2))[0]
         _valid_cnt = struct.unpack(f"<{_bytecount}i", f.read(_bytecount * 4))
-
-    stations = []
-    for _ in range(loc):
-        lat = struct.unpack("<d", f.read(8))[0]
-        lon = struct.unpack("<d", f.read(8))[0]
-        elev = struct.unpack("<h", f.read(2))[0]
-        who = _read_cstring(f)
-        country = _read_cstring(f)
-        region = _read_cstring(f)
-        stations.append(dict(lat=lat, lon=lon, elev=elev,
-                             who=who, country=country, region=region))
-
-    n_lat = round((lat_max - lat_min) / 0.25) + 1
-    n_lon = round((lon_max - lon_min) / 0.25) + 1
-    nbytes = count * varcount * n_lat * n_lon
-    arr = np.frombuffer(f.read(nbytes), dtype=np.uint8) \
-            .reshape(count, varcount, n_lat, n_lon).copy()
 
     header = dict(
         key1=key1, key2=key2, version=version,
@@ -75,13 +50,51 @@ def read_pww(data: bytes) -> tuple[dict, list, np.ndarray]:
         loc=loc, loc_fc=loc_fc,
         varcount=varcount, var_codes=var_codes,
     )
+    return header, count, varcount
+
+
+def _read_stations(f, loc: int) -> list:
+    stations = []
+    for _ in range(loc):
+        lat = struct.unpack("<d", f.read(8))[0]
+        lon = struct.unpack("<d", f.read(8))[0]
+        elev = struct.unpack("<h", f.read(2))[0]
+        who = _read_cstring(f)
+        country = _read_cstring(f)
+        region = _read_cstring(f)
+        stations.append(dict(lat=lat, lon=lon, elev=elev,
+                             who=who, country=country, region=region))
+    return stations
+
+
+def read_pww(data: bytes) -> tuple[dict, list, np.ndarray]:
+    """Parse a PWW binary from bytes (VERSION 1 or 2).
+
+    VERSION 1 station block is skipped (grid metadata, not real lat/lon).
+    """
+    f = io.BytesIO(data)
+    header, count, varcount = _parse_header_only(f)
+    n_lat = round((header["lat_max"] - header["lat_min"]) / 0.25) + 1
+    n_lon = round((header["lon_max"] - header["lon_min"]) / 0.25) + 1
+    nbytes = count * varcount * n_lat * n_lon
+
+    if header["version"] >= 2:
+        stations = _read_stations(f, header["loc"])
+        arr_offset = f.tell()
+    else:
+        stations = []
+        header["loc"] = 0
+        arr_offset = len(data) - nbytes
+
+    arr = np.frombuffer(data, dtype=np.uint8, offset=arr_offset, count=nbytes) \
+            .reshape(count, varcount, n_lat, n_lon).copy()
     return header, stations, arr
 
 
 def crop_to_bbox(header: dict, stations: list, arr: np.ndarray, region: tuple) -> tuple[dict, list, np.ndarray]:
     """Crop a full-grid PWW array to a bounding box.
 
-    region : (lat_max, lon_min, lat_min, lon_max) tuple — CDS convention (N, W, S, E).
+    region : (lat_max, lon_min, lat_min, lon_max) — CDS convention (N, W, S, E).
     """
     if not (isinstance(region, tuple) and len(region) == 4):
         raise ValueError("region must be a (lat_max, lon_min, lat_min, lon_max) tuple")
@@ -92,7 +105,6 @@ def crop_to_bbox(header: dict, stations: list, arr: np.ndarray, region: tuple) -
 
     lat_s = round((r_lat_min - src_lat_min) / 0.25)
     lat_e = round((r_lat_max - src_lat_min) / 0.25) + 1
-
     lon_s = round((src_lon_max - r_lon_max) / 0.25)
     lon_e = round((src_lon_max - r_lon_min) / 0.25) + 1
 
