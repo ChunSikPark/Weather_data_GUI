@@ -205,6 +205,8 @@ async def download_region(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"Invalid bbox: {exc}")
 
+    region_tag = "+".join(ids) if have_ids else "custom"
+
     area = (resolved[0] - resolved[2]) * (resolved[3] - resolved[1])
     if area >= 2380 and source in ("hrrr_history", "hrrr_history_archive"):
         raise HTTPException(
@@ -224,14 +226,14 @@ async def download_region(
             pww_bytes = await loop.run_in_executor(
                 None, download_module.fetch_and_crop, source, date_keys[0], resolved, catalog_data
             )
-            filename = f"{source}_{date_keys[0]}_region.pww"
+            filename = f"{source}_{date_keys[0]}_{region_tag}.pww"
             return Response(
                 content=pww_bytes,
                 media_type="application/octet-stream",
                 headers={"Content-Disposition": f'attachment; filename="{filename}"'},
             )
 
-        filename = f"{source}_region_bundle_{len(date_keys)}_files.zip"
+        filename = f"{source}_{region_tag}_bundle_{len(date_keys)}_files.zip"
 
         async def _stream_zip():
             import io
@@ -243,7 +245,7 @@ async def download_region(
                         pww_bytes = await loop.run_in_executor(
                             None, download_module.fetch_and_crop, source, key, resolved, catalog_data
                         )
-                        zf.writestr(f"{source}_{key}_region.pww", pww_bytes)
+                        zf.writestr(f"{source}_{key}_{region_tag}.pww", pww_bytes)
                         del pww_bytes
                     except Exception as exc:
                         print(f"[region] skip {key}: {exc}", file=sys.stderr)
