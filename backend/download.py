@@ -231,7 +231,10 @@ def fetch_and_crop(
         header, stations, arr = pww_io.read_pww_file(tmp_pww)
         os.unlink(tmp_pww); tmp_pww = None
 
-        header, stations, arr = pww_io.crop_to_bbox(header, stations, arr, bbox)
+        header, stations, arr = pww_io.crop_to_bbox(
+            header, stations, arr, bbox,
+            synthesize_stations=source.startswith("era5"),
+        )
 
         if t_start is not None or t_end is not None:
             ts = t_start if t_start is not None else header["date_min"]
