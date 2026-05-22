@@ -957,7 +957,7 @@ function showDownloadError(msg) {
   els.downloadError.classList.remove('hidden');
 }
 
-async function _fetchWithProgress(url) {
+async function _fetchWithProgress(url, onProgress) {
   const res = await fetch(url);
   if (!res.ok) {
     const text = await res.text().catch(() => `HTTP ${res.status}`);
@@ -979,9 +979,11 @@ async function _fetchWithProgress(url) {
     received += value.length;
     if (hasLength) {
       setProgressBar(received / contentLength);
-      setProgressText(`${_fmtBytes(received)} / ${_fmtBytes(contentLength)} (${Math.round(received / contentLength * 100)}%)`);
+      const msg = `${_fmtBytes(received)} / ${_fmtBytes(contentLength)} (${Math.round(received / contentLength * 100)}%)`;
+      onProgress ? onProgress(msg) : setProgressText(msg);
     } else {
-      setProgressText(`Downloading… ${_fmtBytes(received)}`);
+      const msg = `Downloading… ${_fmtBytes(received)}`;
+      onProgress ? onProgress(msg) : setProgressText(msg);
     }
   }
 
@@ -996,6 +998,21 @@ async function _fetchWithProgress(url) {
     if (match) filename = match[1].replace(/['"]/g, '');
   }
   return { blob, filename };
+}
+
+function _buildSingleRegionURL(dateKey) {
+  const sourceKey = getApiSourceKey();
+  const sel = state.selectedRegions;
+  let url = `${API_BASE}/api/download/region?source=${encodeURIComponent(sourceKey)}&dates=${encodeURIComponent(dateKey)}`;
+  if (sel.layer === 'custom') {
+    url += `&bbox=${sel.bbox.join(',')}`;
+  } else {
+    url += `&region_layer=${sel.layer}&region_ids=${sel.ids.join(',')}`;
+  }
+  const tc = state.selectedTimeCrop;
+  if (tc && tc.start) url += `&time_start=${encodeURIComponent(tc.start)}`;
+  if (tc && tc.end)   url += `&time_end=${encodeURIComponent(tc.end)}`;
+  return url;
 }
 
 function _triggerBlobDownload(blob, filename) {
@@ -1027,10 +1044,45 @@ async function handleDownload() {
     return;
   }
 
-  // Region crop or multi-file — fetch with streaming progress
   setDownloadLoading(true);
-  setProgressText('Connecting…');
 
+  // Multi-file region crop: fetch each file individually so we can show per-file progress,
+  // then bundle client-side with JSZip.
+  if (isRegion && count > 1) {
+    try {
+      const dateKeys = [...state.selectedDates].sort();
+      const zip = new JSZip(); // eslint-disable-line no-undef
+
+      for (let i = 0; i < dateKeys.length; i++) {
+        const key = dateKeys[i];
+        setProgressText(`File ${i + 1} of ${dateKeys.length} — waiting for server…`);
+        showProgressBar(true);
+
+        const { blob, filename } = await _fetchWithProgress(
+          _buildSingleRegionURL(key),
+          (msg) => setProgressText(`File ${i + 1} of ${dateKeys.length} — ${msg}`),
+        );
+        zip.file(filename || `${getApiSourceKey()}_${key}_region.pww`, blob);
+      }
+
+      setProgressText('Building ZIP…');
+      showProgressBar(true);
+      const zipBlob = await zip.generateAsync({ type: 'blob' }, (meta) => {
+        setProgressText(`Building ZIP… ${Math.round(meta.percent)}%`);
+        setProgressBar(meta.percent / 100);
+      });
+      _triggerBlobDownload(zipBlob, `${getApiSourceKey()}_region_bundle_${count}_files.zip`);
+    } catch (err) {
+      showDownloadError(`Download failed: ${err.message}`);
+    } finally {
+      setDownloadLoading(false);
+      setTimeout(hideProgress, 2000);
+    }
+    return;
+  }
+
+  // Single file (with or without region) or multi-file non-region ZIP
+  setProgressText('Processing…');
   try {
     const { blob, filename } = await _fetchWithProgress(url);
     _triggerBlobDownload(blob, filename || (count === 1 ? 'weather-region.pww' : 'weather-data.zip'));

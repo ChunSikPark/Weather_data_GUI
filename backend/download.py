@@ -269,7 +269,7 @@ def fetch_and_crop(
         file_id = get_file_id(source, date_key, catalog)
         tmp_dl = _fetch_drive_to_tmp(file_id)
 
-        if source.startswith("hrrr"):
+        if source.startswith("hrrr") or source.startswith("era5"):
             tmp_pww = _unzip_pww_to_tmp(tmp_dl)
             os.unlink(tmp_dl); tmp_dl = None
         else:

@@ -295,6 +295,8 @@ async def download_region(
             fd, zip_path = tempfile.mkstemp(suffix=".zip", dir="/tmp")
             os.close(fd)
             try:
+                succeeded = 0
+                errors: list[str] = []
                 with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
                     for key in date_keys:
                         try:
@@ -304,8 +306,15 @@ async def download_region(
                             )
                             zf.writestr(f"{source}_{key}_{region_tag}{ttag}.pww", pww_bytes)
                             del pww_bytes
+                            succeeded += 1
                         except Exception as exc:
                             print(f"[region] skip {key}: {exc}", file=sys.stderr)
+                            errors.append(f"{key}: {exc}")
+                if succeeded == 0:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"All {len(date_keys)} files failed to process. First error: {errors[0] if errors else 'unknown'}",
+                    )
                 with open(zip_path, "rb") as f:
                     while chunk := f.read(64 * 1024):
                         yield chunk
