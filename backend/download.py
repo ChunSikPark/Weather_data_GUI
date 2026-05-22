@@ -7,7 +7,6 @@ import zipfile
 from collections.abc import Iterable
 from typing import Any
 
-import httpx
 from fastapi import HTTPException
 from googleapiclient.http import MediaIoBaseDownload
 
@@ -86,17 +85,17 @@ def collect_entries(
 ) -> list[dict[str, str]]:
     """Resolve a list of (source, key) pairs into download entries.
 
-    Each entry has ``name`` and ``url`` fields suitable for ``build_zip_stream``.
+    Each entry has ``name`` and ``id`` fields suitable for ``build_zip_stream``.
     """
     out: list[dict[str, str]] = []
     missing: list[str] = []
     for key in date_keys:
         try:
-            url = get_file_url(source, key, catalog)
+            file_id = get_file_id(source, key, catalog)
         except HTTPException:
             missing.append(key)
             continue
-        out.append({"name": _filename_for(source, key), "url": url})
+        out.append({"name": _filename_for(source, key), "id": file_id})
     if not out:
         raise HTTPException(
             status_code=404,
@@ -106,36 +105,34 @@ def collect_entries(
 
 
 def build_zip_stream(file_entries: list[dict[str, str]]) -> str:
-    """Fetch each Drive file and stream it into a ZIP on disk.
+    """Fetch each Drive file via service account and stream it into a ZIP on disk.
 
     Returns the /tmp ZIP path. Caller must delete it after streaming.
-    Uses httpx streaming + zf.open(..., 'w') so peak RAM is one 2 MB chunk.
+    Uses MediaIoBaseDownload in 8 MB chunks so peak RAM stays low.
     ZIP_STORED is used because inputs are already compressed.
     """
-    import os, tempfile
+    import os, tempfile, catalog as _cat
     fd, zip_path = tempfile.mkstemp(suffix=".zip", dir="/tmp")
     os.close(fd)
     try:
+        service = _cat.DriveClient()._get_service()
         with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_STORED) as zf:
-            with httpx.Client(timeout=120.0, follow_redirects=True) as client:
-                for entry in file_entries:
-                    name = entry["name"]
-                    url = entry["url"]
-                    try:
-                        with client.stream("GET", url) as resp:
-                            resp.raise_for_status()
-                            with zf.open(name, "w", force_zip64=True) as entry_f:
-                                for chunk in resp.iter_bytes(chunk_size=2 * 1024 * 1024):
-                                    entry_f.write(chunk)
-                    except httpx.HTTPError as exc:
-                        print(
-                            f"[download] Failed to fetch {name} from {url}: {exc}",
-                            file=sys.stderr,
-                        )
-                        raise HTTPException(
-                            status_code=502,
-                            detail=f"Failed to fetch {name} from upstream",
-                        )
+            for entry in file_entries:
+                name = entry["name"]
+                file_id = entry["id"]
+                request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
+                buf = io.BytesIO()
+                dl = MediaIoBaseDownload(buf, request, chunksize=8 * 1024 * 1024)
+                done = False
+                with zf.open(name, "w", force_zip64=True) as entry_f:
+                    while not done:
+                        _, done = dl.next_chunk()
+                        buf.seek(0)
+                        data = buf.read()
+                        buf.seek(0)
+                        buf.truncate()
+                        if data:
+                            entry_f.write(data)
     except BaseException:
         try:
             os.unlink(zip_path)
@@ -269,7 +266,7 @@ def fetch_and_crop(
         file_id = get_file_id(source, date_key, catalog)
         tmp_dl = _fetch_drive_to_tmp(file_id)
 
-        if source.startswith("hrrr") or source.startswith("era5"):
+        if source.startswith("hrrr"):
             tmp_pww = _unzip_pww_to_tmp(tmp_dl)
             os.unlink(tmp_dl); tmp_dl = None
         else:
