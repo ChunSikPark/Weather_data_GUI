@@ -1426,6 +1426,21 @@ function renderTimeCropPanelOnce() {
   updateTimeCropPanel();
 }
 
+function _quarterDateRange(key) {
+  const m = key.match(/^(\d{4})-Q([1-4])$/);
+  if (!m) return null;
+  const year = parseInt(m[1]);
+  const q = parseInt(m[2]);
+  const ranges = {
+    1: [`${year}-01-01`, `${year}-03-31`],
+    2: [`${year}-04-01`, `${year}-06-30`],
+    3: [`${year}-07-01`, `${year}-09-30`],
+    4: [`${year}-10-01`, `${year}-12-31`],
+  };
+  const [start, end] = ranges[q];
+  return { start, end };
+}
+
 function updateTimeCropPanel() {
   const panel = document.getElementById('time-crop-panel');
   if (!panel) return;
@@ -1434,10 +1449,56 @@ function updateTimeCropPanel() {
   const note = document.getElementById('time-crop-disabled-note');
   const inputs = document.getElementById('time-crop-inputs');
   if (!note || !inputs) return;
-  const single = count === 1;
-  note.classList.toggle('hidden', single);
-  inputs.classList.toggle('hidden', !single);
-  inputs.querySelectorAll('input, select').forEach(el => { el.disabled = !single; });
+
+  const disable = (msg) => {
+    note.textContent = msg;
+    note.classList.remove('hidden');
+    inputs.classList.add('hidden');
+    inputs.querySelectorAll('input, select').forEach(el => { el.disabled = true; });
+  };
+
+  if (count !== 1) {
+    disable('Select a single date to enable time crop.');
+    return;
+  }
+
+  // ERA5: apply quarter-based date bounds and latest-quarter guard
+  if (state.selectedSource === 'era5') {
+    const dateKey = [...state.selectedDates][0];
+    const sourceKey = getApiSourceKey();
+    const quarters = state.catalog?.[sourceKey]?.quarters || [];
+    const latestQ = quarters.length ? [...quarters].sort().at(-1) : null;
+
+    if (dateKey === latestQ) {
+      disable('Time crop disabled for the latest quarter — data may be incomplete.');
+      return;
+    }
+
+    const qRange = _quarterDateRange(dateKey);
+    if (qRange) {
+      ['start', 'end'].forEach(k => {
+        const d = document.getElementById(`time-crop-${k}-date`);
+        if (!d) return;
+        d.min = qRange.start;
+        d.max = qRange.end;
+        // clear out-of-range value from a previous quarter
+        if (d.value && (d.value < qRange.start || d.value > qRange.end)) {
+          d.value = '';
+          state.selectedTimeCrop[k] = null;
+        }
+      });
+    }
+  } else {
+    // Non-ERA5: remove any bounds
+    ['start', 'end'].forEach(k => {
+      const d = document.getElementById(`time-crop-${k}-date`);
+      if (d) { d.min = ''; d.max = ''; }
+    });
+  }
+
+  note.classList.add('hidden');
+  inputs.classList.remove('hidden');
+  inputs.querySelectorAll('input, select').forEach(el => { el.disabled = false; });
 }
 
 // ── Initialization ────────────────────────────────────────────────────────────
