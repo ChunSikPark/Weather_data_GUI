@@ -233,6 +233,18 @@ async def download_region(
     t_start_epoch = _parse_iso_to_epoch(time_start, "time_start") if time_start else None
     t_end_epoch = _parse_iso_to_epoch(time_end, "time_end") if time_end else None
 
+    def _time_tag() -> str:
+        if not (t_start_epoch or t_end_epoch):
+            return ""
+        from datetime import datetime, timezone
+        fmt = lambda ts: datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y%m%dH%H") if ts else ""
+        s, e = fmt(t_start_epoch), fmt(t_end_epoch)
+        if s and e:
+            return f"_T{s}to{e}"
+        return f"_T{s or e}"
+
+    ttag = _time_tag()
+
     date_keys = download_module.parse_dates_param(dates)
     loop = asyncio.get_running_loop()
     catalog_data = await loop.run_in_executor(None, catalog_module.get_catalog)
@@ -243,7 +255,7 @@ async def download_region(
                 None, download_module.fetch_and_crop, source, date_keys[0], resolved, catalog_data,
                 t_start_epoch, t_end_epoch,
             )
-            filename = f"{source}_{date_keys[0]}_{region_tag}.pww"
+            filename = f"{source}_{date_keys[0]}_{region_tag}{ttag}.pww"
             return Response(
                 content=pww_bytes,
                 media_type="application/octet-stream",
@@ -253,7 +265,7 @@ async def download_region(
                 },
             )
 
-        filename = f"{source}_{region_tag}_bundle_{len(date_keys)}_files.zip"
+        filename = f"{source}_{region_tag}{ttag}_bundle_{len(date_keys)}_files.zip"
 
         async def _stream_zip():
             import io
@@ -266,7 +278,7 @@ async def download_region(
                             None, download_module.fetch_and_crop, source, key, resolved, catalog_data,
                             t_start_epoch, t_end_epoch,
                         )
-                        zf.writestr(f"{source}_{key}_{region_tag}.pww", pww_bytes)
+                        zf.writestr(f"{source}_{key}_{region_tag}{ttag}.pww", pww_bytes)
                         del pww_bytes
                     except Exception as exc:
                         print(f"[region] skip {key}: {exc}", file=sys.stderr)
