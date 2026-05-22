@@ -1023,6 +1023,35 @@ function _triggerBlobDownload(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(objectURL), 10_000);
 }
 
+function _buildPrepPhases(count, isRegion) {
+  // Phases shown while we wait for the first byte from the server. Times are
+  // rough — actual progress depends on file sizes and Drive transfer speed.
+  if (count === 1 && !isRegion) {
+    return [
+      'Connecting to Google Drive and starting transfer…',
+      'Downloading from Google Drive — large files can take 1–2 minutes…',
+      'Still working — almost ready to transfer to your browser…',
+    ];
+  }
+  if (count === 1 && isRegion) {
+    return [
+      'Server is downloading the file from Google Drive…',
+      'Cropping the file to your selected region…',
+      'Almost ready — finalizing the cropped file…',
+    ];
+  }
+  // Multi-file
+  const action = isRegion
+    ? `cropping each to your region`
+    : `packaging them into a ZIP`;
+  return [
+    `Server is downloading ${count} files from Google Drive and ${action}…`,
+    `Still working — large multi-file requests can take several minutes…`,
+    `Building the ZIP archive — almost ready to start the transfer…`,
+    `Finalizing — preparing the download…`,
+  ];
+}
+
 async function handleDownload() {
   const count = state.selectedDates.size;
   if (count === 0) return;
@@ -1034,15 +1063,28 @@ async function handleDownload() {
   hideProgress();
   setDownloadLoading(true);
 
-  // Unified flow: one request to the backend, which streams the result (single
-  // file or a ZIP bundle of bare .pww files). Same status messages for every
-  // case so the user always knows what stage the download is at.
-  setProgressText('Preparing on server…');
+  // Rotate through preparation phases while we wait for the first byte from
+  // the server. As soon as data starts flowing, _fetchWithProgress takes over
+  // and shows real "X MB / Y MB (Z%)" progress.
+  const phases = _buildPrepPhases(count, isRegion);
+  let phaseIdx = 0;
+  setProgressText(phases[0]);
   showProgressBar(true);
+
+  const phaseTimer = setInterval(() => {
+    if (phaseIdx < phases.length - 1) {
+      phaseIdx++;
+      setProgressText(phases[phaseIdx]);
+    }
+  }, 20_000);
+
   try {
     const { blob, filename } = await _fetchWithProgress(
       buildDownloadURL(),
-      (msg) => setProgressText(msg),
+      (msg) => {
+        clearInterval(phaseTimer);
+        setProgressText(`Downloading — ${msg}`);
+      },
     );
 
     let defaultName;
@@ -1057,6 +1099,7 @@ async function handleDownload() {
   } catch (err) {
     showDownloadError(`Download failed: ${err.message}`);
   } finally {
+    clearInterval(phaseTimer);
     setDownloadLoading(false);
     setTimeout(hideProgress, 2000);
   }
