@@ -1027,48 +1027,29 @@ async function handleDownload() {
   const count = state.selectedDates.size;
   if (count === 0) return;
 
-  const url = buildDownloadURL();
-  const isRegion = url.includes('/api/download/region');
+  const isRegion = !!state.selectedRegions;
+  const sourceKey = getApiSourceKey();
 
   els.downloadError.classList.add('hidden');
   hideProgress();
 
+  // Single file, no region: backend supports direct browser stream, no progress to track
   if (count === 1 && !isRegion) {
-    // Direct Drive redirect — browser handles it, just show a brief toast
     setProgressText('Download initiated…');
-    window.location.href = url;
+    window.location.href = buildDownloadURL();
     setTimeout(hideProgress, 4000);
     return;
   }
 
   setDownloadLoading(true);
 
-  // Multi-file region crop: fetch each file individually so we can show per-file progress,
-  // then bundle client-side with JSZip.
-  if (isRegion && count > 1) {
+  // Single file with region crop: fetch the cropped file with byte progress
+  if (count === 1 && isRegion) {
+    setProgressText('Waiting for server…');
+    showProgressBar(true);
     try {
-      const dateKeys = [...state.selectedDates].sort();
-      const zip = new JSZip(); // eslint-disable-line no-undef
-
-      for (let i = 0; i < dateKeys.length; i++) {
-        const key = dateKeys[i];
-        setProgressText(`File ${i + 1} of ${dateKeys.length} — waiting for server…`);
-        showProgressBar(true);
-
-        const { blob, filename } = await _fetchWithProgress(
-          _buildSingleRegionURL(key),
-          (msg) => setProgressText(`File ${i + 1} of ${dateKeys.length} — ${msg}`),
-        );
-        zip.file(filename || `${getApiSourceKey()}_${key}_region.pww`, blob);
-      }
-
-      setProgressText('Building ZIP…');
-      showProgressBar(true);
-      const zipBlob = await zip.generateAsync({ type: 'blob' }, (meta) => {
-        setProgressText(`Building ZIP… ${Math.round(meta.percent)}%`);
-        setProgressBar(meta.percent / 100);
-      });
-      _triggerBlobDownload(zipBlob, `${getApiSourceKey()}_region_bundle_${count}_files.zip`);
+      const { blob, filename } = await _fetchWithProgress(buildDownloadURL());
+      _triggerBlobDownload(blob, filename || 'weather-region.pww');
     } catch (err) {
       showDownloadError(`Download failed: ${err.message}`);
     } finally {
@@ -1078,11 +1059,36 @@ async function handleDownload() {
     return;
   }
 
-  // Single file (with or without region) or multi-file non-region ZIP
-  setProgressText('Processing…');
+  // Multi-file (region or not): fetch each file individually so we can show per-file
+  // progress, then bundle client-side with JSZip.
   try {
-    const { blob, filename } = await _fetchWithProgress(url);
-    _triggerBlobDownload(blob, filename || (count === 1 ? 'weather-region.pww' : 'weather-data.zip'));
+    const dateKeys = [...state.selectedDates].sort();
+    const zip = new JSZip(); // eslint-disable-line no-undef
+
+    for (let i = 0; i < dateKeys.length; i++) {
+      const key = dateKeys[i];
+      setProgressText(`File ${i + 1} of ${dateKeys.length} — waiting for server…`);
+      showProgressBar(true);
+
+      const singleUrl = isRegion
+        ? _buildSingleRegionURL(key)
+        : `${API_BASE}/api/download?source=${encodeURIComponent(sourceKey)}&dates=${encodeURIComponent(key)}`;
+
+      const { blob, filename } = await _fetchWithProgress(
+        singleUrl,
+        (msg) => setProgressText(`File ${i + 1} of ${dateKeys.length} — ${msg}`),
+      );
+      zip.file(filename || `${sourceKey}_${key}`, blob);
+    }
+
+    setProgressText('Building ZIP…');
+    showProgressBar(true);
+    const zipBlob = await zip.generateAsync({ type: 'blob' }, (meta) => {
+      setProgressText(`Building ZIP… ${Math.round(meta.percent)}%`);
+      setProgressBar(meta.percent / 100);
+    });
+    const suffix = isRegion ? 'region_bundle' : 'bundle';
+    _triggerBlobDownload(zipBlob, `${sourceKey}_${suffix}_${count}_files.zip`);
   } catch (err) {
     showDownloadError(`Download failed: ${err.message}`);
   } finally {
