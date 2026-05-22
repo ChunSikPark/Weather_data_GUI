@@ -96,7 +96,7 @@ Date key formats:
 | GET | `/api/catalog` | full catalog (cached 30 min) |
 | GET | `/api/catalog/refresh` | force rebuild (browser-friendly) |
 | POST | `/api/catalog/refresh` | force rebuild |
-| GET | `/api/download?source=...&dates=...` | single = 302 to Drive; multi = ZIP stream |
+| GET | `/api/download?source=...&dates=...` | both single and multi stream via service account (bypasses Drive virus-scan); single returns the bare file, multi returns a ZIP bundle |
 | GET | `/api/regions` | region catalog: `{states:[{id,name,bbox},...], iso:[...]}` |
 | GET | `/api/download/region?source=...&dates=...&region_layer=...&region_ids=...` | fetch + crop to bbox; single=.pww, multi=ZIP |
 | GET | `/api/debug/folders` | resolved folder IDs the catalog is using |
@@ -146,6 +146,16 @@ Returns 400 if both/neither of `region_ids`/`bbox` are given. Returns 413 with `
 6. **NOAA "Recent" vs "Archive" is folder-based, not date-based**. Earlier attempts at date-based splitting all failed because the dataset's "newness" doesn't match wall-clock time. Each tab pulls strictly from its own folder.
 
 7. **Cache TTL is 30 minutes**. Use `GET /api/catalog/refresh` to force a rebuild after deployment or after sharing a new folder with the service account.
+
+8. **Single-file downloads go through the service account, not direct Drive URLs.** Large Drive files (>~100 MB) trigger a virus-scan confirmation HTML page when fetched via `webContentLink`, which produces silent failures (empty downloads or HTML where binary data should be). All download paths now use `MediaIoBaseDownload` through the service account; the dead-code helper `get_file_url` in `download.py` remains as a landmine — don't reintroduce it.
+
+9. **`_FILENAME_PATTERNS` extension MUST match the actual Drive file format.** If the suggested filename says `.zip` but the bytes are bare `.pww`, the user's PWW viewer rejects the extracted file. ERA5 and NOAA single files are `.pww`; HRRR single files are `.zip` (containing one `.pww`). Inside a multi-file ZIP bundle, each entry inherits this same naming, so getting it right matters in both single and bundle contexts.
+
+10. **Concurrency caps protect the worker from threadpool starvation and `/tmp` exhaustion.** `_single_dl_sem(4)` caps simultaneous single-file Drive streams; `_region_sem(1)` serializes region crops; `_download_sem(1)` serializes multi-file ZIP builds. The single-file semaphore wraps the streaming generator (not just the route handler) so the cap holds for the full duration of the transfer.
+
+11. **`_fetch_drive_to_tmp` must clean up its temp file on any error** — a Drive error mid-download otherwise orphans a multi-GB `/tmp` file with no reaper. Wrap the body in `try: ... except BaseException: os.unlink(path); raise`.
+
+12. **Frontend uses one unified download flow** — every request goes through `_fetchWithProgress` against `buildDownloadURL()`. While waiting for the first byte, the frontend rotates through phase-specific status messages every 20s ("Downloading from Drive…", "Cropping to region…", "Building the ZIP archive…") so the user knows what stage the server is at; once bytes start flowing, it switches to "Downloading — X MB / Y MB (Z%)". Don't reintroduce per-case branching with divergent messages.
 
 ## Deployment
 

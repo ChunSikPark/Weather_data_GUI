@@ -45,8 +45,9 @@ class NOAAClient:
     ) -> list[Path]:
         """Download NOAA/GFS forecast PWW files.
 
-        For a single cycle the API redirects to the actual file; for multiple
-        cycles the API streams a combined ZIP.
+        NOAA/GFS files in Drive are bare ``.pww``. For a single cycle the
+        API streams the ``.pww`` directly; for multiple cycles the API
+        streams a ZIP bundle containing the ``.pww`` files inside.
 
         Args:
             cycles: Cycle identifier strings.
@@ -66,7 +67,7 @@ class NOAAClient:
         if len(cycles) == 1:
             c = cycles[0]
             safe = c.replace(":", "").replace(" ", "_")
-            filename = f"NOAA_forecast_{safe}.zip"
+            filename = f"NOAA_forecast_{safe}.pww"
             path = self._client._download(
                 "/api/download",
                 dest_dir=dest,

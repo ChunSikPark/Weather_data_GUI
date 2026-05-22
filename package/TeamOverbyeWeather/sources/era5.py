@@ -54,11 +54,12 @@ class ERA5Client:
         region: str = "north_america",
         dest: str = ".",
     ) -> list[Path]:
-        """Download ERA5 quarterly ZIP files.
+        """Download ERA5 quarterly files.
 
-        For a single quarter the API redirects to the actual file; for
-        multiple quarters the API returns a combined ZIP stream.  Both cases
-        are handled transparently.
+        ERA5 files in Drive are bare ``.pww`` (Team Overbye binary format).
+        For a single quarter the API streams the ``.pww`` directly; for
+        multiple quarters the API streams a ZIP bundle containing the
+        ``.pww`` files inside. Both cases are handled transparently.
 
         Args:
             quarters: Quarter strings like ``["2025-Q1", "2024-Q4"]``.
@@ -86,7 +87,7 @@ class ERA5Client:
 
         if len(quarters) == 1:
             q = quarters[0]
-            filename = f"ERA5_{source_key}_{q}.zip"
+            filename = f"ERA5_{source_key}_{q}.pww"
             path = self._client._download(
                 "/api/download",
                 dest_dir=dest,
