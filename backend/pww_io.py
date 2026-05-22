@@ -227,28 +227,47 @@ def write_pww(header: dict, stations: list, arr: np.ndarray) -> bytes:
     return f.getvalue()
 
 
+_OLE_EPOCH_OFFSET = 25569.0  # OLE days from Dec 30 1899 to Unix epoch Jan 1 1970
+
+def _unix_to_ole(unix_sec: float) -> float:
+    """Convert Unix epoch seconds to OLE Automation days."""
+    return unix_sec / 86400 + _OLE_EPOCH_OFFSET
+
+
 def crop_to_timerange(header: dict, arr: np.ndarray, t_start: float, t_end: float) -> tuple[dict, np.ndarray]:
     """Crop the time axis of a PWW array to [t_start, t_end] (Unix epoch seconds).
 
+    PWW stores date_min/date_max as OLE Automation days (days since Dec 30 1899).
+    t_start/t_end are converted to OLE days before indexing.
     Returns (new_header, cropped_arr).  Raises ValueError if no time steps fall
     within the range.
     """
-    date_min = header["date_min"]
+    date_min_ole = header["date_min"]
+    date_max_ole = header["date_max"]
     sample_sec = header["sample_sec"]
+    sample_days = sample_sec / 86400
     count = arr.shape[0]
 
-    i_start = max(0, round((t_start - date_min) / sample_sec))
-    i_end = min(count, round((t_end - date_min) / sample_sec) + 1)
+    ole_start = _unix_to_ole(t_start)
+    ole_end = _unix_to_ole(t_end)
+
+    i_start = max(0, round((ole_start - date_min_ole) / sample_days))
+    i_end = min(count, round((ole_end - date_min_ole) / sample_days) + 1)
 
     if i_start >= i_end:
+        from datetime import datetime, timezone, timedelta
+        def _ole_to_iso(ole):
+            unix = (ole - _OLE_EPOCH_OFFSET) * 86400
+            return datetime.fromtimestamp(unix, tz=timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
         raise ValueError(
-            f"No time steps in range [{t_start}, {t_end}]; "
-            f"file covers [{date_min}, {header['date_max']}]"
+            f"No time steps in requested range "
+            f"[{_ole_to_iso(ole_start)}, {_ole_to_iso(ole_end)}]; "
+            f"file covers [{_ole_to_iso(date_min_ole)}, {_ole_to_iso(date_max_ole)}]"
         )
 
     cropped = arr[i_start:i_end].copy()
-    new_date_min = date_min + i_start * sample_sec
-    new_date_max = date_min + (i_end - 1) * sample_sec
+    new_date_min = date_min_ole + i_start * sample_days
+    new_date_max = date_min_ole + (i_end - 1) * sample_days
 
     new_header = dict(header)
     new_header.update(date_min=new_date_min, date_max=new_date_max)
