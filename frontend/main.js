@@ -1369,6 +1369,12 @@ function renderTimeCropPanelOnce() {
     inp.step = '3600';
     inp.className = 'time-crop-input';
     inp.addEventListener('change', () => {
+      if (inp.value) {
+        // Enforce hour boundary — zero out minutes/seconds
+        const pad = n => String(n).padStart(2, '0');
+        const dt = new Date(inp.value);
+        inp.value = `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:00`;
+      }
       state.selectedTimeCrop[inputId === 'time-crop-start' ? 'start' : 'end'] = inp.value || null;
       updateDownloadBar();
     });
