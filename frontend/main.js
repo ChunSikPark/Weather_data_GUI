@@ -1470,7 +1470,7 @@ function updateTimeCropPanel() {
     const latestQ = quarters.length ? [...quarters].sort().at(-1) : null;
 
     if (dateKey === latestQ) {
-      disable('Time crop disabled for the latest quarter — data may be incomplete.');
+      disable('Time crop unavailable — the latest quarter does not contain a full range of data.');
       return;
     }
 
