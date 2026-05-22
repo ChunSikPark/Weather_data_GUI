@@ -1059,36 +1059,52 @@ async function handleDownload() {
     return;
   }
 
-  // Multi-file (region or not): fetch each file individually so we can show per-file
-  // progress, then bundle client-side with JSZip.
-  try {
-    const dateKeys = [...state.selectedDates].sort();
-    const zip = new JSZip(); // eslint-disable-line no-undef
+  // Multi-file with region crop: cropped files are small enough to bundle client-side
+  // with JSZip, so we can show per-file progress.
+  if (isRegion) {
+    try {
+      const dateKeys = [...state.selectedDates].sort();
+      const zip = new JSZip(); // eslint-disable-line no-undef
 
-    for (let i = 0; i < dateKeys.length; i++) {
-      const key = dateKeys[i];
-      setProgressText(`File ${i + 1} of ${dateKeys.length} — waiting for server…`);
+      for (let i = 0; i < dateKeys.length; i++) {
+        const key = dateKeys[i];
+        setProgressText(`File ${i + 1} of ${dateKeys.length} — waiting for server…`);
+        showProgressBar(true);
+
+        const { blob, filename } = await _fetchWithProgress(
+          _buildSingleRegionURL(key),
+          (msg) => setProgressText(`File ${i + 1} of ${dateKeys.length} — ${msg}`),
+        );
+        zip.file(filename || `${sourceKey}_${key}_region.pww`, blob);
+      }
+
+      setProgressText('Building ZIP…');
       showProgressBar(true);
-
-      const singleUrl = isRegion
-        ? _buildSingleRegionURL(key)
-        : `${API_BASE}/api/download?source=${encodeURIComponent(sourceKey)}&dates=${encodeURIComponent(key)}`;
-
-      const { blob, filename } = await _fetchWithProgress(
-        singleUrl,
-        (msg) => setProgressText(`File ${i + 1} of ${dateKeys.length} — ${msg}`),
-      );
-      zip.file(filename || `${sourceKey}_${key}`, blob);
+      const zipBlob = await zip.generateAsync({ type: 'blob' }, (meta) => {
+        setProgressText(`Building ZIP… ${Math.round(meta.percent)}%`);
+        setProgressBar(meta.percent / 100);
+      });
+      _triggerBlobDownload(zipBlob, `${sourceKey}_region_bundle_${count}_files.zip`);
+    } catch (err) {
+      showDownloadError(`Download failed: ${err.message}`);
+    } finally {
+      setDownloadLoading(false);
+      setTimeout(hideProgress, 2000);
     }
+    return;
+  }
 
-    setProgressText('Building ZIP…');
-    showProgressBar(true);
-    const zipBlob = await zip.generateAsync({ type: 'blob' }, (meta) => {
-      setProgressText(`Building ZIP… ${Math.round(meta.percent)}%`);
-      setProgressBar(meta.percent / 100);
-    });
-    const suffix = isRegion ? 'region_bundle' : 'bundle';
-    _triggerBlobDownload(zipBlob, `${sourceKey}_${suffix}_${count}_files.zip`);
+  // Multi-file without region: full-size files can be 100s of MB each — client-side
+  // JSZip would OOM the browser tab. Use the server-side ZIP path; Content-Length is
+  // set so the progress bar tracks the transfer accurately.
+  setProgressText('Server is bundling files (this may take a few minutes)…');
+  showProgressBar(true);
+  try {
+    const { blob, filename } = await _fetchWithProgress(
+      buildDownloadURL(),
+      (msg) => setProgressText(`Downloading bundle — ${msg}`),
+    );
+    _triggerBlobDownload(blob, filename || `${sourceKey}_bundle_${count}_files.zip`);
   } catch (err) {
     showDownloadError(`Download failed: ${err.message}`);
   } finally {

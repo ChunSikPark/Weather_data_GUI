@@ -180,6 +180,7 @@ async def download(
 
         zip_path = await loop.run_in_executor(None, _build)
         filename = download_module.zip_filename_for(source, date_keys)
+        zip_size = os.path.getsize(zip_path)
 
         async def _stream_and_cleanup():
             try:
@@ -195,7 +196,10 @@ async def download(
         return StreamingResponse(
             _stream_and_cleanup(),
             media_type="application/zip",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(zip_size),
+            },
         )
 
 
