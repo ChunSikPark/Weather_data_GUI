@@ -1385,6 +1385,12 @@ function renderTimeCropPanelOnce() {
 
     const sync = () => {
       if (dateInp.value) {
+        // Clamp day to last valid day of the selected month (e.g. Feb 31 → Feb 28/29)
+        const [y, mo, d] = dateInp.value.split('-').map(Number);
+        const lastDay = new Date(y, mo, 0).getDate();
+        if (d > lastDay) {
+          dateInp.value = `${y}-${String(mo).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+        }
         state.selectedTimeCrop[key] = `${dateInp.value}T${hourSel.value}:00:00`;
       } else {
         state.selectedTimeCrop[key] = null;
