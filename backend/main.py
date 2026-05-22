@@ -61,6 +61,8 @@ app.add_middleware(
 _region_sem = asyncio.Semaphore(1)
 # Serialize regular multi-file ZIP builds to cap peak /tmp usage.
 _download_sem = asyncio.Semaphore(1)
+# Cap concurrent single-file downloads to prevent threadpool starvation under load.
+_single_dl_sem = asyncio.Semaphore(4)
 
 
 @app.get("/api/health")
@@ -156,8 +158,16 @@ async def download(
         }
         if size:
             headers["Content-Length"] = str(size)
+
+        async def _capped_stream():
+            # Hold semaphore for the entire stream so threadpool workers aren't starved
+            # by more than 4 concurrent Drive downloads.
+            async with _single_dl_sem:
+                async for chunk in iterate_in_threadpool(download_module.stream_drive_file(file_id)):
+                    yield chunk
+
         return StreamingResponse(
-            iterate_in_threadpool(download_module.stream_drive_file(file_id)),
+            _capped_stream(),
             media_type="application/octet-stream",
             headers=headers,
         )
@@ -256,6 +266,8 @@ async def download_region(
 
     t_start_epoch = _parse_iso_to_epoch(time_start, "time_start") if time_start else None
     t_end_epoch = _parse_iso_to_epoch(time_end, "time_end") if time_end else None
+    if t_start_epoch and t_end_epoch and t_end_epoch <= t_start_epoch:
+        raise HTTPException(status_code=400, detail="time_end must be after time_start")
 
     def _time_tag() -> str:
         if not (t_start_epoch or t_end_epoch):

@@ -222,17 +222,24 @@ def _fetch_drive_to_tmp(file_id: str) -> str:
     service = _cat.DriveClient()._get_service()
     request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
     fd, path = tempfile.mkstemp(suffix=".tmp", dir="/tmp")
-    with os.fdopen(fd, "wb") as f:
-        dl = MediaIoBaseDownload(f, request, chunksize=8 * 1024 * 1024)
-        done = False
-        while not done:
-            _, done = dl.next_chunk()
+    try:
+        with os.fdopen(fd, "wb") as f:
+            dl = MediaIoBaseDownload(f, request, chunksize=8 * 1024 * 1024)
+            done = False
+            while not done:
+                _, done = dl.next_chunk()
+    except BaseException:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        raise
     return path
 
 
 def _unzip_pww_to_tmp(zip_path: str) -> str:
     """Extract the single .pww from a ZIP on disk to a new /tmp file. Caller must delete."""
-    import os, tempfile
+    import os, tempfile, shutil
     with zipfile.ZipFile(zip_path) as zf:
         pww_names = [n for n in zf.namelist() if n.lower().endswith(".pww")]
         if not pww_names:
@@ -240,8 +247,15 @@ def _unzip_pww_to_tmp(zip_path: str) -> str:
         if len(pww_names) > 1:
             print(f"[download] ZIP has {len(pww_names)} .pww files; using {pww_names[0]}", file=sys.stderr)
         fd, path = tempfile.mkstemp(suffix=".pww", dir="/tmp")
-        with os.fdopen(fd, "wb") as f:
-            f.write(zf.read(pww_names[0]))
+        try:
+            with os.fdopen(fd, "wb") as dst, zf.open(pww_names[0]) as src:
+                shutil.copyfileobj(src, dst, length=8 * 1024 * 1024)
+        except BaseException:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            raise
     return path
 
 
