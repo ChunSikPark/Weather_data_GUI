@@ -1383,16 +1383,30 @@ function renderTimeCropPanelOnce() {
       hourSel.appendChild(opt);
     }
 
+    let _intendedMonth = null;
+
+    dateInp.addEventListener('focus', () => {
+      _intendedMonth = dateInp.value ? parseInt(dateInp.value.split('-')[1]) : null;
+    });
+
     const sync = () => {
       if (dateInp.value) {
-        // Clamp day to last valid day of the selected month (e.g. Feb 31 → Feb 28/29)
-        const [y, mo, d] = dateInp.value.split('-').map(Number);
-        const lastDay = new Date(y, mo, 0).getDate();
-        if (d > lastDay) {
-          dateInp.value = `${y}-${String(mo).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+        let [y, mo, d] = dateInp.value.split('-').map(Number);
+        // If the browser rolled the date into a different month (e.g. Feb 31 → Mar 3),
+        // clamp back to the last day of the intended month instead.
+        if (_intendedMonth && mo !== _intendedMonth) {
+          mo = _intendedMonth;
+          d = new Date(y, mo, 0).getDate();
+        } else {
+          const lastDay = new Date(y, mo, 0).getDate();
+          if (d > lastDay) d = lastDay;
         }
+        _intendedMonth = null;
+        const pad = n => String(n).padStart(2, '0');
+        dateInp.value = `${y}-${pad(mo)}-${pad(d)}`;
         state.selectedTimeCrop[key] = `${dateInp.value}T${hourSel.value}:00:00`;
       } else {
+        _intendedMonth = null;
         state.selectedTimeCrop[key] = null;
       }
       updateDownloadBar();
