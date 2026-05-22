@@ -164,7 +164,15 @@ Auto-deploys on push to `main`. Build output dir = `frontend`. No build step.
 
 ### Backend — two options
 
-**Option A: Self-hosted Docker + Cloudflare Tunnel (current/preferred)**
+**Option A: Railway (current)**
+
+Railway auto-deploys on push to `main` (~90s). Verify with `curl /api/health` then `curl /api/debug/folders`.
+Env vars needed: `GDRIVE_CREDENTIALS_JSON_CONTENT`, `CORS_ORIGINS=https://weather-data-gui.pages.dev`.
+Note: Railway Starter plan has 512 MB RAM — the backend is tuned for this limit (semaphores prevent concurrent OOM). NOAA folder env vars on Railway are stale; ignore them (folder IDs are hardcoded in `catalog.py`).
+
+The pipeline status indicator will read `unknown` for every source on Railway because the `config/alert_state.json` file produced by the weather-auto pipelines is not available there. This is cosmetic — the data API works regardless.
+
+**Option B: Self-hosted Docker + Cloudflare Tunnel (alternative)**
 
 The backend runs on the team's automation computer via Docker. Cloudflare Tunnel exposes it to the internet without port forwarding.
 
@@ -195,10 +203,6 @@ curl https://your-tunnel-url/api/health
 curl https://your-tunnel-url/api/debug/folders
 ```
 
-**Option B: Railway (fallback)**
-Railway auto-deploys on push to `main` (~90s). Verify with `curl /api/health` then `curl /api/debug/folders`.
-Env vars needed: `GDRIVE_CREDENTIALS_JSON_CONTENT`, `CORS_ORIGINS=https://weather-data-gui.pages.dev`.
-Note: Railway Starter plan has 512 MB RAM — the backend is tuned for this limit. NOAA folder env vars on Railway are stale; ignore them (folder IDs are hardcoded in `catalog.py`).
 
 ## Frontend extras worth knowing
 
