@@ -137,20 +137,10 @@ def read_pww_file(path: str) -> tuple[dict, list, np.ndarray]:
     return header, stations, arr
 
 
-def crop_to_bbox(
-    header: dict,
-    stations: list,
-    arr: np.ndarray,
-    region: tuple,
-    synthesize_stations: bool = False,
-) -> tuple[dict, list, np.ndarray]:
+def crop_to_bbox(header: dict, stations: list, arr: np.ndarray, region: tuple) -> tuple[dict, list, np.ndarray]:
     """Crop a full-grid PWW array to a bounding box.
 
     region : (lat_max, lon_min, lat_min, lon_max) tuple — CDS convention (N, W, S, E).
-    synthesize_stations : if True and the input station list is empty (VERSION 1 source),
-        generate one station record per grid cell and upgrade the output to VERSION 2
-        so PowerWorld can load the file.  Pass True for ERA5 sources; leave False for
-        HRRR/NOAA whose VERSION 1 station blocks are intentionally discarded.
     """
     if not (isinstance(region, tuple) and len(region) == 4):
         raise ValueError("region must be a (lat_max, lon_min, lat_min, lon_max) tuple")
@@ -183,29 +173,12 @@ def crop_to_bbox(
         and (new_lon_min - eps) <= s["lon"] <= (new_lon_max + eps)
     ]
 
-    if synthesize_stations and not new_stations:
-        n_lat_crop = cropped.shape[2]
-        n_lon_crop = cropped.shape[3]
-        new_stations = []
-        for i_lat in range(n_lat_crop):
-            lat_v = new_lat_min + i_lat * 0.25
-            for i_lon in range(n_lon_crop):
-                lon_v = new_lon_max - i_lon * 0.25  # lon axis descends
-                new_stations.append(dict(
-                    lat=round(lat_v, 4), lon=round(lon_v, 4), elev=0,
-                    who=f"+{lat_v:.2f}{lon_v:+.2f}/",
-                    country="", region="",
-                ))
-
     new_header = dict(header)
     new_header.update(
         lat_min=new_lat_min, lat_max=new_lat_max,
         lon_min=new_lon_min, lon_max=new_lon_max,
         loc=len(new_stations),
     )
-    if synthesize_stations and new_stations:
-        new_header["version"] = 2
-        new_header["key2"] = 8066
     return new_header, new_stations, cropped
 
 
