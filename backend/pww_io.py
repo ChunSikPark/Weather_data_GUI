@@ -133,6 +133,13 @@ def read_pww_file(path: str) -> tuple[dict, list, np.ndarray]:
             arr = np.frombuffer(mm, dtype=np.uint8, offset=arr_offset, count=nbytes) \
                     .reshape(count, varcount, n_lat, n_lon).copy()
         finally:
+            # Release mapped pages immediately so the kernel reclaims page cache.
+            # Prevents accumulation across sequential multi-file crops on Railway.
+            if hasattr(mmap, "MADV_DONTNEED"):
+                try:
+                    mm.madvise(mmap.MADV_DONTNEED)
+                except OSError:
+                    pass
             mm.close()
     return header, stations, arr
 

@@ -4,11 +4,14 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import tempfile
+import zipfile
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from starlette.concurrency import iterate_in_threadpool
 
 import catalog as catalog_module
 import download as download_module
@@ -56,6 +59,8 @@ app.add_middleware(
 
 # Serialize region-crop work so concurrent requests can't OOM the Railway worker.
 _region_sem = asyncio.Semaphore(1)
+# Serialize regular multi-file ZIP builds to cap peak /tmp usage.
+_download_sem = asyncio.Semaphore(1)
 
 
 @app.get("/api/health")
@@ -142,27 +147,46 @@ async def download(
     catalog_data = await loop.run_in_executor(None, catalog_module.get_catalog)
 
     if len(date_keys) == 1:
-        try:
-            url = download_module.get_file_url(source, date_keys[0], catalog_data)
-        except HTTPException:
-            raise
-        return RedirectResponse(url=url, status_code=302)
+        # Proxy through service account — bypasses Drive virus-scan confirmation page.
+        file_id = download_module.get_file_id(source, date_keys[0], catalog_data)
+        size = await loop.run_in_executor(None, download_module.get_drive_file_size, file_id)
+        filename = download_module._filename_for(source, date_keys[0])
+        headers: dict[str, str] = {
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        }
+        if size:
+            headers["Content-Length"] = str(size)
+        return StreamingResponse(
+            iterate_in_threadpool(download_module.stream_drive_file(file_id)),
+            media_type="application/octet-stream",
+            headers=headers,
+        )
 
-    entries = download_module.collect_entries(source, date_keys, catalog_data)
+    async with _download_sem:
+        entries = download_module.collect_entries(source, date_keys, catalog_data)
 
-    def _build() -> "BytesIO":  # type: ignore[name-defined]
-        return download_module.build_zip_stream(entries)
+        def _build() -> str:
+            return download_module.build_zip_stream(entries)
 
-    buf = await loop.run_in_executor(None, _build)
-    filename = download_module.zip_filename_for(source, date_keys)
-    headers = {
-        "Content-Disposition": f'attachment; filename="{filename}"',
-    }
-    return StreamingResponse(
-        download_module.iter_zip_chunks(buf),
-        media_type="application/zip",
-        headers=headers,
-    )
+        zip_path = await loop.run_in_executor(None, _build)
+        filename = download_module.zip_filename_for(source, date_keys)
+
+        async def _stream_and_cleanup():
+            try:
+                with open(zip_path, "rb") as f:
+                    while chunk := f.read(64 * 1024):
+                        yield chunk
+            finally:
+                try:
+                    os.unlink(zip_path)
+                except OSError:
+                    pass
+
+        return StreamingResponse(
+            _stream_and_cleanup(),
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
 
 @app.get("/api/regions")
@@ -268,23 +292,28 @@ async def download_region(
         filename = f"{source}_{region_tag}{ttag}_bundle_{len(date_keys)}_files.zip"
 
         async def _stream_zip():
-            import io
-            import zipfile
-            buf = io.BytesIO()
-            with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
-                for key in date_keys:
-                    try:
-                        pww_bytes = await loop.run_in_executor(
-                            None, download_module.fetch_and_crop, source, key, resolved, catalog_data,
-                            t_start_epoch, t_end_epoch,
-                        )
-                        zf.writestr(f"{source}_{key}_{region_tag}{ttag}.pww", pww_bytes)
-                        del pww_bytes
-                    except Exception as exc:
-                        print(f"[region] skip {key}: {exc}", file=sys.stderr)
-            buf.seek(0)
-            for chunk in download_module.iter_zip_chunks(buf):
-                yield chunk
+            fd, zip_path = tempfile.mkstemp(suffix=".zip", dir="/tmp")
+            os.close(fd)
+            try:
+                with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
+                    for key in date_keys:
+                        try:
+                            pww_bytes = await loop.run_in_executor(
+                                None, download_module.fetch_and_crop, source, key, resolved, catalog_data,
+                                t_start_epoch, t_end_epoch,
+                            )
+                            zf.writestr(f"{source}_{key}_{region_tag}{ttag}.pww", pww_bytes)
+                            del pww_bytes
+                        except Exception as exc:
+                            print(f"[region] skip {key}: {exc}", file=sys.stderr)
+                with open(zip_path, "rb") as f:
+                    while chunk := f.read(64 * 1024):
+                        yield chunk
+            finally:
+                try:
+                    os.unlink(zip_path)
+                except OSError:
+                    pass
 
         return StreamingResponse(
             _stream_zip(),

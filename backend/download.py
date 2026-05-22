@@ -105,33 +105,44 @@ def collect_entries(
     return out
 
 
-def build_zip_stream(file_entries: list[dict[str, str]]) -> io.BytesIO:
-    """Fetch each file via HTTP and pack them into an in-memory ZIP archive.
+def build_zip_stream(file_entries: list[dict[str, str]]) -> str:
+    """Fetch each Drive file and stream it into a ZIP on disk.
 
-    Returns a ``BytesIO`` positioned at offset 0. ``ZIP_STORED`` is used because
-    the inputs are already compressed (.zip / .pww) so re-deflating is wasteful.
+    Returns the /tmp ZIP path. Caller must delete it after streaming.
+    Uses httpx streaming + zf.open(..., 'w') so peak RAM is one 2 MB chunk.
+    ZIP_STORED is used because inputs are already compressed.
     """
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_STORED) as zf:
-        with httpx.Client(timeout=120.0, follow_redirects=True) as client:
-            for entry in file_entries:
-                name = entry["name"]
-                url = entry["url"]
-                try:
-                    resp = client.get(url)
-                    resp.raise_for_status()
-                except httpx.HTTPError as exc:
-                    print(
-                        f"[download] Failed to fetch {name} from {url}: {exc}",
-                        file=sys.stderr,
-                    )
-                    raise HTTPException(
-                        status_code=502,
-                        detail=f"Failed to fetch {name} from upstream",
-                    )
-                zf.writestr(name, resp.content)
-    buf.seek(0)
-    return buf
+    import os, tempfile
+    fd, zip_path = tempfile.mkstemp(suffix=".zip", dir="/tmp")
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_STORED) as zf:
+            with httpx.Client(timeout=120.0, follow_redirects=True) as client:
+                for entry in file_entries:
+                    name = entry["name"]
+                    url = entry["url"]
+                    try:
+                        with client.stream("GET", url) as resp:
+                            resp.raise_for_status()
+                            with zf.open(name, "w", force_zip64=True) as entry_f:
+                                for chunk in resp.iter_bytes(chunk_size=2 * 1024 * 1024):
+                                    entry_f.write(chunk)
+                    except httpx.HTTPError as exc:
+                        print(
+                            f"[download] Failed to fetch {name} from {url}: {exc}",
+                            file=sys.stderr,
+                        )
+                        raise HTTPException(
+                            status_code=502,
+                            detail=f"Failed to fetch {name} from upstream",
+                        )
+    except BaseException:
+        try:
+            os.unlink(zip_path)
+        except OSError:
+            pass
+        raise
+    return zip_path
 
 
 def iter_zip_chunks(buf: io.BytesIO, chunk_size: int = 64 * 1024) -> Iterable[bytes]:
@@ -169,6 +180,42 @@ def get_file_id(source: str, date_key: str, catalog: dict) -> str:
     if not entry or not entry.get("id"):
         raise HTTPException(status_code=404, detail=f"No file ID for {source} {date_key}")
     return entry["id"]
+
+
+def get_drive_file_size(file_id: str) -> int | None:
+    """Return the Drive file size in bytes, or None if unavailable."""
+    import catalog as _cat
+    try:
+        service = _cat.DriveClient()._get_service()
+        meta = service.files().get(
+            fileId=file_id, fields="size", supportsAllDrives=True
+        ).execute()
+        return int(meta.get("size") or 0) or None
+    except Exception:
+        return None
+
+
+def stream_drive_file(file_id: str):
+    """Yield a Drive file in 8 MB chunks via service account.
+
+    Sync generator — callers must wrap with iterate_in_threadpool to avoid
+    blocking the FastAPI event loop.  Routes through the service account so the
+    browser never sees Google's virus-scan confirmation page.
+    """
+    import catalog as _cat
+    service = _cat.DriveClient()._get_service()
+    request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
+    buf = io.BytesIO()
+    dl = MediaIoBaseDownload(buf, request, chunksize=8 * 1024 * 1024)
+    done = False
+    while not done:
+        _, done = dl.next_chunk()
+        buf.seek(0)
+        data = buf.read()
+        buf.seek(0)
+        buf.truncate()
+        if data:
+            yield data
 
 
 def _fetch_drive_to_tmp(file_id: str) -> str:
