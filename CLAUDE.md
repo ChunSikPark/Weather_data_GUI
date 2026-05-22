@@ -149,9 +149,46 @@ Returns 400 if both/neither of `region_ids`/`bbox` are given. Returns 413 with `
 
 ## Deployment
 
-- **Backend (Railway)**: auto-deploys on push to `main`. Takes ~90s. Verify with `curl /api/health` then `curl /api/debug/folders`.
-- **Frontend (Cloudflare Pages)**: auto-deploys on push to `main`. Build output dir = `frontend`. No build step.
-- **Env vars on Railway** (current): `GDRIVE_CREDENTIALS_JSON_CONTENT`, `CORS_ORIGINS=https://weather-data-gui.pages.dev`. NOAA folder env vars are stale; ignore them.
+### Frontend (Cloudflare Pages)
+Auto-deploys on push to `main`. Build output dir = `frontend`. No build step.
+
+### Backend — two options
+
+**Option A: Self-hosted Docker + Cloudflare Tunnel (current/preferred)**
+
+The backend runs on the team's automation computer via Docker. Cloudflare Tunnel exposes it to the internet without port forwarding.
+
+```bash
+# 1. Copy and fill in credentials
+cp .env.example .env
+# Edit .env: set GDRIVE_CREDENTIALS_JSON_CONTENT and CORS_ORIGINS
+
+# 2. Start the backend
+docker compose up -d --build
+
+# 3. Install cloudflared and create a tunnel (one-time setup)
+# https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
+cloudflared tunnel login
+cloudflared tunnel create weather-backend
+cloudflared tunnel route dns weather-backend <your-subdomain.yourdomain.com>
+cloudflared tunnel run --url http://localhost:8000 weather-backend
+
+# 4. Update CORS_ORIGINS in .env to the tunnel URL, then restart:
+docker compose restart backend
+```
+
+After the tunnel is running, update the frontend's `API_BASE` in `frontend/main.js` to the tunnel URL and push.
+
+**Verify after start:**
+```bash
+curl https://your-tunnel-url/api/health
+curl https://your-tunnel-url/api/debug/folders
+```
+
+**Option B: Railway (fallback)**
+Railway auto-deploys on push to `main` (~90s). Verify with `curl /api/health` then `curl /api/debug/folders`.
+Env vars needed: `GDRIVE_CREDENTIALS_JSON_CONTENT`, `CORS_ORIGINS=https://weather-data-gui.pages.dev`.
+Note: Railway Starter plan has 512 MB RAM — the backend is tuned for this limit. NOAA folder env vars on Railway are stale; ignore them (folder IDs are hardcoded in `catalog.py`).
 
 ## Frontend extras worth knowing
 
