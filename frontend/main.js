@@ -1327,6 +1327,24 @@ function updateRegionPanel() {
 }
 
 // ── Time Crop Panel ───────────────────────────────────────────────────────────
+const _TC_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// rebuildDays functions keyed by 'start'/'end', set during renderTimeCropPanelOnce
+const _tcRebuild = {};
+
+function _setTimeCropField(key, dateStr, hourStr) {
+  const [y, mo, d] = dateStr.split('-').map(Number);
+  const ySel = document.getElementById(`time-crop-${key}-year`);
+  const mSel = document.getElementById(`time-crop-${key}-month`);
+  const dSel = document.getElementById(`time-crop-${key}-day`);
+  const hSel = document.getElementById(`time-crop-${key}-hour`);
+  if (ySel) ySel.value = y;
+  if (mSel) mSel.value = mo;
+  if (_tcRebuild[key]) _tcRebuild[key]();
+  if (dSel) dSel.value = d;
+  if (hSel) hSel.value = hourStr;
+  state.selectedTimeCrop[key] = `${dateStr}T${hourStr}:00:00`;
+}
+
 function renderTimeCropPanelOnce() {
   if (state.timeCropPanelRendered) {
     updateTimeCropPanel();
@@ -1346,14 +1364,11 @@ function renderTimeCropPanelOnce() {
   const body = document.createElement('div');
   body.className = 'region-filter-body';
 
-  // Disabled note (shown when multiple dates selected)
   const note = document.createElement('p');
   note.id = 'time-crop-disabled-note';
   note.className = 'time-crop-disabled-note hidden';
-  note.textContent = 'Select a single date to enable time crop.';
   body.appendChild(note);
 
-  // Inputs row
   const row = document.createElement('div');
   row.id = 'time-crop-inputs';
   row.className = 'time-crop-inputs';
@@ -1368,54 +1383,72 @@ function renderTimeCropPanelOnce() {
     const inner = document.createElement('div');
     inner.className = 'time-crop-field-inner';
 
-    const dateInp = document.createElement('input');
-    dateInp.type = 'date';
-    dateInp.id = `time-crop-${key}-date`;
-    dateInp.className = 'time-crop-input';
-
-    const hourSel = document.createElement('select');
-    hourSel.id = `time-crop-${key}-hour`;
-    hourSel.className = 'time-crop-input time-crop-hour';
-    for (let h = 0; h < 24; h++) {
-      const opt = document.createElement('option');
-      opt.value = String(h).padStart(2, '0');
-      opt.textContent = `${String(h).padStart(2, '0')}:00`;
-      hourSel.appendChild(opt);
+    // Year select
+    const ySel = document.createElement('select');
+    ySel.id = `time-crop-${key}-year`;
+    ySel.className = 'time-crop-input time-crop-year';
+    for (let y = 1940; y <= 2035; y++) {
+      const o = document.createElement('option');
+      o.value = y; o.textContent = y;
+      ySel.appendChild(o);
     }
 
-    let _intendedMonth = null;
-
-    dateInp.addEventListener('focus', () => {
-      _intendedMonth = dateInp.value ? parseInt(dateInp.value.split('-')[1]) : null;
+    // Month select
+    const mSel = document.createElement('select');
+    mSel.id = `time-crop-${key}-month`;
+    mSel.className = 'time-crop-input time-crop-month';
+    _TC_MONTHS.forEach((name, i) => {
+      const o = document.createElement('option');
+      o.value = i + 1; o.textContent = name;
+      mSel.appendChild(o);
     });
 
-    const sync = () => {
-      if (dateInp.value) {
-        let [y, mo, d] = dateInp.value.split('-').map(Number);
-        // If the browser rolled the date into a different month (e.g. Feb 31 → Mar 3),
-        // clamp back to the last day of the intended month instead.
-        if (_intendedMonth && mo !== _intendedMonth) {
-          mo = _intendedMonth;
-          d = new Date(y, mo, 0).getDate();
-        } else {
-          const lastDay = new Date(y, mo, 0).getDate();
-          if (d > lastDay) d = lastDay;
-        }
-        _intendedMonth = null;
-        const pad = n => String(n).padStart(2, '0');
-        dateInp.value = `${y}-${pad(mo)}-${pad(d)}`;
-        state.selectedTimeCrop[key] = `${dateInp.value}T${hourSel.value}:00:00`;
-      } else {
-        _intendedMonth = null;
-        state.selectedTimeCrop[key] = null;
+    // Day select — rebuilt whenever year/month change
+    const dSel = document.createElement('select');
+    dSel.id = `time-crop-${key}-day`;
+    dSel.className = 'time-crop-input time-crop-day';
+
+    const rebuildDays = () => {
+      const curDay = parseInt(dSel.value) || 1;
+      const lastDay = new Date(parseInt(ySel.value), parseInt(mSel.value), 0).getDate();
+      dSel.innerHTML = '';
+      for (let d = 1; d <= lastDay; d++) {
+        const o = document.createElement('option');
+        o.value = d; o.textContent = String(d).padStart(2, '0');
+        dSel.appendChild(o);
       }
+      dSel.value = Math.min(curDay, lastDay);
+    };
+    _tcRebuild[key] = rebuildDays;
+    rebuildDays();
+
+    // Hour select
+    const hSel = document.createElement('select');
+    hSel.id = `time-crop-${key}-hour`;
+    hSel.className = 'time-crop-input time-crop-hour';
+    for (let h = 0; h < 24; h++) {
+      const o = document.createElement('option');
+      o.value = String(h).padStart(2, '0');
+      o.textContent = `${String(h).padStart(2, '0')}:00`;
+      hSel.appendChild(o);
+    }
+
+    const syncState = () => {
+      const pad = n => String(n).padStart(2, '0');
+      const dateStr = `${ySel.value}-${pad(mSel.value)}-${pad(dSel.value)}`;
+      state.selectedTimeCrop[key] = `${dateStr}T${hSel.value}:00:00`;
       updateDownloadBar();
     };
-    dateInp.addEventListener('change', sync);
-    hourSel.addEventListener('change', sync);
 
-    inner.appendChild(dateInp);
-    inner.appendChild(hourSel);
+    ySel.addEventListener('change', () => { rebuildDays(); syncState(); });
+    mSel.addEventListener('change', () => { rebuildDays(); syncState(); });
+    dSel.addEventListener('change', syncState);
+    hSel.addEventListener('change', syncState);
+
+    inner.appendChild(ySel);
+    inner.appendChild(mSel);
+    inner.appendChild(dSel);
+    inner.appendChild(hSel);
     wrap.appendChild(inner);
     return wrap;
   };
@@ -1429,12 +1462,7 @@ function renderTimeCropPanelOnce() {
   clearBtn.style.marginTop = '6px';
   clearBtn.addEventListener('click', () => {
     state.selectedTimeCrop = { start: null, end: null };
-    ['start', 'end'].forEach(k => {
-      const d = document.getElementById(`time-crop-${k}-date`);
-      const h = document.getElementById(`time-crop-${k}-hour`);
-      if (d) d.value = '';
-      if (h) h.value = '00';
-    });
+    updateTimeCropPanel();
     updateDownloadBar();
   });
   row.appendChild(clearBtn);
@@ -1497,26 +1525,15 @@ function updateTimeCropPanel() {
     const qRange = _quarterDateRange(dateKey);
     if (qRange) {
       const defaults = { start: qRange.start, end: qRange.end };
+      const hours = { start: '00', end: '23' };
       ['start', 'end'].forEach(k => {
-        const d = document.getElementById(`time-crop-${k}-date`);
-        if (!d) return;
-        d.min = qRange.start;
-        d.max = qRange.end;
-        // Pre-fill with quarter bounds if blank or out of range
-        if (!d.value || d.value < qRange.start || d.value > qRange.end) {
-          d.value = defaults[k];
-          const h = document.getElementById(`time-crop-${k}-hour`);
-          if (h) h.value = k === 'start' ? '00' : '23';
-          state.selectedTimeCrop[k] = `${defaults[k]}T${k === 'start' ? '00' : '23'}:00:00`;
+        const cur = state.selectedTimeCrop[k];
+        const curDate = cur ? cur.slice(0, 10) : null;
+        if (!curDate || curDate < qRange.start || curDate > qRange.end) {
+          _setTimeCropField(k, defaults[k], hours[k]);
         }
       });
     }
-  } else {
-    // Non-ERA5: remove any bounds
-    ['start', 'end'].forEach(k => {
-      const d = document.getElementById(`time-crop-${k}-date`);
-      if (d) { d.min = ''; d.max = ''; }
-    });
   }
 
   note.classList.add('hidden');

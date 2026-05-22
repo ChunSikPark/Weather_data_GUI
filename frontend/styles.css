@@ -1032,9 +1032,10 @@ button {
   gap: 6px;
   align-items: center;
 }
-.time-crop-hour {
-  width: 80px;
-}
+.time-crop-year  { width: 74px; }
+.time-crop-month { width: 62px; }
+.time-crop-day   { width: 52px; }
+.time-crop-hour  { width: 70px; }
 .time-crop-input {
   background: var(--bg);
   border: 1px solid var(--border);
