@@ -101,12 +101,16 @@
   </main>
 
   <footer id="download-bar">
+    <div id="download-progress-bar" class="download-progress-bar hidden">
+      <div id="download-progress-fill" class="download-progress-fill"></div>
+    </div>
     <div class="download-bar-inner">
       <div class="download-summary">
         <span class="download-summary-icon">&#8681;</span>
         <span id="download-summary-text" class="download-summary-text">No data selected</span>
       </div>
       <div class="download-actions">
+        <span id="download-progress-text" class="download-progress-text hidden"></span>
         <span id="download-error" class="download-error hidden"></span>
         <button id="btn-download" class="btn-download" disabled aria-label="Download selected data">
           <span class="btn-download-icon" id="download-icon">&#8681;</span>

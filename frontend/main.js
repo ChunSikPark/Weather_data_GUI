@@ -36,6 +36,9 @@ const els = {
   downloadBar: $('download-bar'),
   downloadSummaryText: $('download-summary-text'),
   downloadError: $('download-error'),
+  downloadProgressBar: $('download-progress-bar'),
+  downloadProgressFill: $('download-progress-fill'),
+  downloadProgressText: $('download-progress-text'),
   btnDownload: $('btn-download'),
   btnDownloadLabel: $('btn-download-label'),
   downloadIcon: $('download-icon'),
@@ -919,9 +922,91 @@ function setDownloadLoading(loading) {
   }
 }
 
+function _fmtBytes(b) {
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function showProgressBar(indeterminate) {
+  els.downloadProgressBar.classList.remove('hidden');
+  els.downloadProgressFill.style.width = '0%';
+  els.downloadProgressFill.classList.toggle('indeterminate', indeterminate);
+}
+
+function setProgressBar(pct) {
+  els.downloadProgressFill.classList.remove('indeterminate');
+  els.downloadProgressFill.style.width = `${Math.min(100, pct * 100).toFixed(1)}%`;
+}
+
+function setProgressText(text) {
+  els.downloadProgressText.textContent = text;
+  els.downloadProgressText.classList.remove('hidden');
+}
+
+function hideProgress() {
+  els.downloadProgressBar.classList.add('hidden');
+  els.downloadProgressFill.style.width = '0%';
+  els.downloadProgressFill.classList.remove('indeterminate');
+  els.downloadProgressText.classList.add('hidden');
+  els.downloadProgressText.textContent = '';
+}
+
 function showDownloadError(msg) {
   els.downloadError.textContent = msg;
   els.downloadError.classList.remove('hidden');
+}
+
+async function _fetchWithProgress(url) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const text = await res.text().catch(() => `HTTP ${res.status}`);
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+
+  const contentLength = parseInt(res.headers.get('Content-Length') || '0', 10);
+  const hasLength = contentLength > 0;
+  showProgressBar(!hasLength);
+
+  const reader = res.body.getReader();
+  const chunks = [];
+  let received = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    if (hasLength) {
+      setProgressBar(received / contentLength);
+      setProgressText(`${_fmtBytes(received)} / ${_fmtBytes(contentLength)} (${Math.round(received / contentLength * 100)}%)`);
+    } else {
+      setProgressText(`Downloading… ${_fmtBytes(received)}`);
+    }
+  }
+
+  setProgressBar(1);
+  const blob = new Blob(chunks);
+
+  // extract filename from Content-Disposition
+  let filename = null;
+  const cd = res.headers.get('Content-Disposition');
+  if (cd) {
+    const match = cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/i);
+    if (match) filename = match[1].replace(/['"]/g, '');
+  }
+  return { blob, filename };
+}
+
+function _triggerBlobDownload(blob, filename) {
+  const objectURL = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = objectURL;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(objectURL), 10_000);
 }
 
 async function handleDownload() {
@@ -929,46 +1014,31 @@ async function handleDownload() {
   if (count === 0) return;
 
   const url = buildDownloadURL();
+  const isRegion = url.includes('/api/download/region');
 
-  if (count === 1) {
-    // Direct download — navigate to URL
+  els.downloadError.classList.add('hidden');
+  hideProgress();
+
+  if (count === 1 && !isRegion) {
+    // Direct Drive redirect — browser handles it, just show a brief toast
+    setProgressText('Download initiated…');
     window.location.href = url;
+    setTimeout(hideProgress, 4000);
     return;
   }
 
-  // Multiple files — fetch as blob and trigger download
+  // Region crop or multi-file — fetch with streaming progress
   setDownloadLoading(true);
-  els.downloadError.classList.add('hidden');
+  setProgressText('Connecting…');
 
   try {
-    const res = await fetch(url);
-    if (!res.ok) {
-      const text = await res.text().catch(() => `HTTP ${res.status}`);
-      throw new Error(text || `HTTP ${res.status}`);
-    }
-
-    const blob = await res.blob();
-    const objectURL = URL.createObjectURL(blob);
-
-    // Infer filename from Content-Disposition or fallback
-    let filename = 'weather-data.zip';
-    const cd = res.headers.get('Content-Disposition');
-    if (cd) {
-      const match = cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/i);
-      if (match) filename = match[1].replace(/['"]/g, '');
-    }
-
-    const a = document.createElement('a');
-    a.href = objectURL;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(objectURL), 10_000);
+    const { blob, filename } = await _fetchWithProgress(url);
+    _triggerBlobDownload(blob, filename || (count === 1 ? 'weather-region.pww' : 'weather-data.zip'));
   } catch (err) {
     showDownloadError(`Download failed: ${err.message}`);
   } finally {
     setDownloadLoading(false);
+    setTimeout(hideProgress, 2000);
   }
 }
 

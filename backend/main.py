@@ -246,7 +246,10 @@ async def download_region(
             return Response(
                 content=pww_bytes,
                 media_type="application/octet-stream",
-                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Content-Length": str(len(pww_bytes)),
+                },
             )
 
         filename = f"{source}_{region_tag}_bundle_{len(date_keys)}_files.zip"
