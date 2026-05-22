@@ -1358,33 +1358,50 @@ function renderTimeCropPanelOnce() {
   row.id = 'time-crop-inputs';
   row.className = 'time-crop-inputs';
 
-  const makeField = (labelText, inputId) => {
-    const wrap = document.createElement('label');
+  const makeField = (labelText, key) => {
+    const wrap = document.createElement('div');
     wrap.className = 'time-crop-field';
     const lbl = document.createElement('span');
     lbl.textContent = labelText;
-    const inp = document.createElement('input');
-    inp.type = 'datetime-local';
-    inp.id = inputId;
-    inp.step = '3600';
-    inp.className = 'time-crop-input';
-    inp.addEventListener('change', () => {
-      if (inp.value) {
-        // Enforce hour boundary — zero out minutes/seconds
-        const pad = n => String(n).padStart(2, '0');
-        const dt = new Date(inp.value);
-        inp.value = `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:00`;
-      }
-      state.selectedTimeCrop[inputId === 'time-crop-start' ? 'start' : 'end'] = inp.value || null;
-      updateDownloadBar();
-    });
     wrap.appendChild(lbl);
-    wrap.appendChild(inp);
+
+    const inner = document.createElement('div');
+    inner.className = 'time-crop-field-inner';
+
+    const dateInp = document.createElement('input');
+    dateInp.type = 'date';
+    dateInp.id = `time-crop-${key}-date`;
+    dateInp.className = 'time-crop-input';
+
+    const hourSel = document.createElement('select');
+    hourSel.id = `time-crop-${key}-hour`;
+    hourSel.className = 'time-crop-input time-crop-hour';
+    for (let h = 0; h < 24; h++) {
+      const opt = document.createElement('option');
+      opt.value = String(h).padStart(2, '0');
+      opt.textContent = `${String(h).padStart(2, '0')}:00`;
+      hourSel.appendChild(opt);
+    }
+
+    const sync = () => {
+      if (dateInp.value) {
+        state.selectedTimeCrop[key] = `${dateInp.value}T${hourSel.value}:00:00`;
+      } else {
+        state.selectedTimeCrop[key] = null;
+      }
+      updateDownloadBar();
+    };
+    dateInp.addEventListener('change', sync);
+    hourSel.addEventListener('change', sync);
+
+    inner.appendChild(dateInp);
+    inner.appendChild(hourSel);
+    wrap.appendChild(inner);
     return wrap;
   };
 
-  row.appendChild(makeField('From', 'time-crop-start'));
-  row.appendChild(makeField('To', 'time-crop-end'));
+  row.appendChild(makeField('From', 'start'));
+  row.appendChild(makeField('To', 'end'));
 
   const clearBtn = document.createElement('button');
   clearBtn.className = 'region-state-btn';
@@ -1392,8 +1409,12 @@ function renderTimeCropPanelOnce() {
   clearBtn.style.marginTop = '6px';
   clearBtn.addEventListener('click', () => {
     state.selectedTimeCrop = { start: null, end: null };
-    document.getElementById('time-crop-start').value = '';
-    document.getElementById('time-crop-end').value = '';
+    ['start', 'end'].forEach(k => {
+      const d = document.getElementById(`time-crop-${k}-date`);
+      const h = document.getElementById(`time-crop-${k}-hour`);
+      if (d) d.value = '';
+      if (h) h.value = '00';
+    });
     updateDownloadBar();
   });
   row.appendChild(clearBtn);
@@ -1416,7 +1437,7 @@ function updateTimeCropPanel() {
   const single = count === 1;
   note.classList.toggle('hidden', single);
   inputs.classList.toggle('hidden', !single);
-  inputs.querySelectorAll('input').forEach(inp => { inp.disabled = !single; });
+  inputs.querySelectorAll('input, select').forEach(el => { el.disabled = !single; });
 }
 
 // ── Initialization ────────────────────────────────────────────────────────────

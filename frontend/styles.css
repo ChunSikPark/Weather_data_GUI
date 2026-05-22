@@ -1027,6 +1027,14 @@ button {
   font-size: 0.8rem;
   color: var(--text-secondary);
 }
+.time-crop-field-inner {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.time-crop-hour {
+  width: 80px;
+}
 .time-crop-input {
   background: var(--bg);
   border: 1px solid var(--border);
