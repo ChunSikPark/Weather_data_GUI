@@ -1340,7 +1340,7 @@ function renderTimeCropPanelOnce() {
 
   const summary = document.createElement('summary');
   summary.className = 'region-filter-summary';
-  summary.textContent = 'Time Crop (optional)';
+  summary.textContent = 'Date & Time Filter (optional)';
   details.appendChild(summary);
 
   const body = document.createElement('div');
@@ -1476,15 +1476,18 @@ function updateTimeCropPanel() {
 
     const qRange = _quarterDateRange(dateKey);
     if (qRange) {
+      const defaults = { start: qRange.start, end: qRange.end };
       ['start', 'end'].forEach(k => {
         const d = document.getElementById(`time-crop-${k}-date`);
         if (!d) return;
         d.min = qRange.start;
         d.max = qRange.end;
-        // clear out-of-range value from a previous quarter
-        if (d.value && (d.value < qRange.start || d.value > qRange.end)) {
-          d.value = '';
-          state.selectedTimeCrop[k] = null;
+        // Pre-fill with quarter bounds if blank or out of range
+        if (!d.value || d.value < qRange.start || d.value > qRange.end) {
+          d.value = defaults[k];
+          const h = document.getElementById(`time-crop-${k}-hour`);
+          if (h) h.value = k === 'start' ? '00' : '23';
+          state.selectedTimeCrop[k] = `${defaults[k]}T${k === 'start' ? '00' : '23'}:00:00`;
         }
       });
     }
