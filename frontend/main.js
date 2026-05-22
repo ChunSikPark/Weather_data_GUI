@@ -16,6 +16,8 @@ const state = {
   regionPanelRendered: false,
   regionCatalog: null,       // { states: [...], iso: [...] }
   regionActiveTab: 'states',
+  selectedTimeCrop: { start: null, end: null },  // ISO strings or null
+  timeCropPanelRendered: false,
 };
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
@@ -268,6 +270,8 @@ function selectSource(source) {
   state.selectedDates.clear();
   state.selectedRegions = null;
   state.regionPanelRendered = false;
+  state.selectedTimeCrop = { start: null, end: null };
+  state.timeCropPanelRendered = false;
 
   // Update card visual state
   els.sourceGrid.querySelectorAll('.source-card').forEach((c) => {
@@ -314,6 +318,8 @@ function selectType(type) {
   state.selectedType = type;
   state.selectedDates.clear();
   state.selectedRegions = null;
+  state.selectedTimeCrop = { start: null, end: null };
+  state.timeCropPanelRendered = false;
 
   els.typeGrid.querySelectorAll('.type-card').forEach((c) => {
     const isSelected = c.dataset.type === type;
@@ -360,6 +366,7 @@ function renderStep3() {
   }
 
   renderRegionPanelOnce();
+  renderTimeCropPanelOnce();
 }
 
 // ── Quarter Picker (ERA5 Historical) ─────────────────────────────────────────
@@ -812,6 +819,7 @@ function getCatalogList(sourceKey, listKey) {
 // ── Download bar ─────────────────────────────────────────────────────────────
 function updateDownloadBar() {
   updateRegionPanel();
+  updateTimeCropPanel();
   const { selectedSource, selectedType, selectedRegion, selectedDates } = state;
   const count = selectedDates.size;
 
@@ -885,11 +893,16 @@ function buildDownloadURL() {
   if (!sel) {
     return `${API_BASE}/api/download?source=${encodeURIComponent(sourceKey)}&dates=${encodeURIComponent(dates)}`;
   }
-  const base = `${API_BASE}/api/download/region?source=${encodeURIComponent(sourceKey)}&dates=${encodeURIComponent(dates)}`;
+  let url = `${API_BASE}/api/download/region?source=${encodeURIComponent(sourceKey)}&dates=${encodeURIComponent(dates)}`;
   if (sel.layer === 'custom') {
-    return `${base}&bbox=${sel.bbox.join(',')}`;
+    url += `&bbox=${sel.bbox.join(',')}`;
+  } else {
+    url += `&region_layer=${sel.layer}&region_ids=${sel.ids.join(',')}`;
   }
-  return `${base}&region_layer=${sel.layer}&region_ids=${sel.ids.join(',')}`;
+  const tc = state.selectedTimeCrop;
+  if (state.selectedDates.size === 1 && tc.start) url += `&time_start=${encodeURIComponent(tc.start)}`;
+  if (state.selectedDates.size === 1 && tc.end)   url += `&time_end=${encodeURIComponent(tc.end)}`;
+  return url;
 }
 
 function setDownloadLoading(loading) {
@@ -1241,6 +1254,93 @@ function updateRegionPanel() {
   if (!hasSelection) {
     state.selectedRegions = null;
   }
+}
+
+// ── Time Crop Panel ───────────────────────────────────────────────────────────
+function renderTimeCropPanelOnce() {
+  if (state.timeCropPanelRendered) {
+    updateTimeCropPanel();
+    return;
+  }
+  state.timeCropPanelRendered = true;
+
+  const details = document.createElement('details');
+  details.id = 'time-crop-panel';
+  details.className = 'region-filter-panel';
+
+  const summary = document.createElement('summary');
+  summary.className = 'region-filter-summary';
+  summary.textContent = 'Time Crop (optional)';
+  details.appendChild(summary);
+
+  const body = document.createElement('div');
+  body.className = 'region-filter-body';
+
+  // Disabled note (shown when multiple dates selected)
+  const note = document.createElement('p');
+  note.id = 'time-crop-disabled-note';
+  note.className = 'time-crop-disabled-note hidden';
+  note.textContent = 'Select a single date to enable time crop.';
+  body.appendChild(note);
+
+  // Inputs row
+  const row = document.createElement('div');
+  row.id = 'time-crop-inputs';
+  row.className = 'time-crop-inputs';
+
+  const makeField = (labelText, inputId) => {
+    const wrap = document.createElement('label');
+    wrap.className = 'time-crop-field';
+    const lbl = document.createElement('span');
+    lbl.textContent = labelText;
+    const inp = document.createElement('input');
+    inp.type = 'datetime-local';
+    inp.id = inputId;
+    inp.step = '3600';
+    inp.className = 'time-crop-input';
+    inp.addEventListener('change', () => {
+      state.selectedTimeCrop[inputId === 'time-crop-start' ? 'start' : 'end'] = inp.value || null;
+      updateDownloadBar();
+    });
+    wrap.appendChild(lbl);
+    wrap.appendChild(inp);
+    return wrap;
+  };
+
+  row.appendChild(makeField('From', 'time-crop-start'));
+  row.appendChild(makeField('To', 'time-crop-end'));
+
+  const clearBtn = document.createElement('button');
+  clearBtn.className = 'region-state-btn';
+  clearBtn.textContent = 'Clear';
+  clearBtn.style.marginTop = '6px';
+  clearBtn.addEventListener('click', () => {
+    state.selectedTimeCrop = { start: null, end: null };
+    document.getElementById('time-crop-start').value = '';
+    document.getElementById('time-crop-end').value = '';
+    updateDownloadBar();
+  });
+  row.appendChild(clearBtn);
+
+  body.appendChild(row);
+  details.appendChild(body);
+  els.step3Controls.appendChild(details);
+
+  updateTimeCropPanel();
+}
+
+function updateTimeCropPanel() {
+  const panel = document.getElementById('time-crop-panel');
+  if (!panel) return;
+  const count = state.selectedDates.size;
+  panel.classList.toggle('hidden', count === 0);
+  const note = document.getElementById('time-crop-disabled-note');
+  const inputs = document.getElementById('time-crop-inputs');
+  if (!note || !inputs) return;
+  const single = count === 1;
+  note.classList.toggle('hidden', single);
+  inputs.classList.toggle('hidden', !single);
+  inputs.querySelectorAll('input').forEach(inp => { inp.disabled = !single; });
 }
 
 // ── Initialization ────────────────────────────────────────────────────────────

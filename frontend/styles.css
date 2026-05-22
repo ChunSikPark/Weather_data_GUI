@@ -980,6 +980,39 @@ button {
 .region-filter-summary:hover { color: var(--accent); }
 .region-filter-body { padding: 0 12px 12px; }
 
+.time-crop-disabled-note {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  padding: 8px 0;
+  margin: 0;
+}
+.time-crop-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 4px 0 8px;
+}
+.time-crop-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+.time-crop-input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-data);
+  font-size: 0.82rem;
+  padding: 5px 8px;
+  outline: none;
+}
+.time-crop-input:focus { border-color: var(--accent); }
+.time-crop-input:disabled { opacity: 0.35; cursor: not-allowed; }
+
 .region-tab-bar { display: flex; gap: 6px; margin-bottom: 12px; }
 .region-tab-btn {
   padding: 5px 14px;
