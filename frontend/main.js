@@ -1009,9 +1009,6 @@ function _buildSingleRegionURL(dateKey) {
   } else {
     url += `&region_layer=${sel.layer}&region_ids=${sel.ids.join(',')}`;
   }
-  const tc = state.selectedTimeCrop;
-  if (tc && tc.start) url += `&time_start=${encodeURIComponent(tc.start)}`;
-  if (tc && tc.end)   url += `&time_end=${encodeURIComponent(tc.end)}`;
   return url;
 }
 
