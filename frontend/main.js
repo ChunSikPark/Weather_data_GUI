@@ -1032,79 +1032,28 @@ async function handleDownload() {
 
   els.downloadError.classList.add('hidden');
   hideProgress();
-
-  // Single file, no region: backend supports direct browser stream, no progress to track
-  if (count === 1 && !isRegion) {
-    setProgressText('Download initiated…');
-    window.location.href = buildDownloadURL();
-    setTimeout(hideProgress, 4000);
-    return;
-  }
-
   setDownloadLoading(true);
 
-  // Single file with region crop: fetch the cropped file with byte progress
-  if (count === 1 && isRegion) {
-    setProgressText('Waiting for server…');
-    showProgressBar(true);
-    try {
-      const { blob, filename } = await _fetchWithProgress(buildDownloadURL());
-      _triggerBlobDownload(blob, filename || 'weather-region.pww');
-    } catch (err) {
-      showDownloadError(`Download failed: ${err.message}`);
-    } finally {
-      setDownloadLoading(false);
-      setTimeout(hideProgress, 2000);
-    }
-    return;
-  }
-
-  // Multi-file with region crop: cropped files are small enough to bundle client-side
-  // with JSZip, so we can show per-file progress.
-  if (isRegion) {
-    try {
-      const dateKeys = [...state.selectedDates].sort();
-      const zip = new JSZip(); // eslint-disable-line no-undef
-
-      for (let i = 0; i < dateKeys.length; i++) {
-        const key = dateKeys[i];
-        setProgressText(`File ${i + 1} of ${dateKeys.length} — waiting for server…`);
-        showProgressBar(true);
-
-        const { blob, filename } = await _fetchWithProgress(
-          _buildSingleRegionURL(key),
-          (msg) => setProgressText(`File ${i + 1} of ${dateKeys.length} — ${msg}`),
-        );
-        zip.file(filename || `${sourceKey}_${key}_region.pww`, blob);
-      }
-
-      setProgressText('Building ZIP…');
-      showProgressBar(true);
-      const zipBlob = await zip.generateAsync({ type: 'blob' }, (meta) => {
-        setProgressText(`Building ZIP… ${Math.round(meta.percent)}%`);
-        setProgressBar(meta.percent / 100);
-      });
-      _triggerBlobDownload(zipBlob, `${sourceKey}_region_bundle_${count}_files.zip`);
-    } catch (err) {
-      showDownloadError(`Download failed: ${err.message}`);
-    } finally {
-      setDownloadLoading(false);
-      setTimeout(hideProgress, 2000);
-    }
-    return;
-  }
-
-  // Multi-file without region: full-size files can be 100s of MB each — client-side
-  // JSZip would OOM the browser tab. Use the server-side ZIP path; Content-Length is
-  // set so the progress bar tracks the transfer accurately.
-  setProgressText('Server is bundling files (this may take a few minutes)…');
+  // Unified flow: one request to the backend, which streams the result (single
+  // file or a ZIP bundle of bare .pww files). Same status messages for every
+  // case so the user always knows what stage the download is at.
+  setProgressText('Preparing on server…');
   showProgressBar(true);
   try {
     const { blob, filename } = await _fetchWithProgress(
       buildDownloadURL(),
-      (msg) => setProgressText(`Downloading bundle — ${msg}`),
+      (msg) => setProgressText(msg),
     );
-    _triggerBlobDownload(blob, filename || `${sourceKey}_bundle_${count}_files.zip`);
+
+    let defaultName;
+    if (count === 1) {
+      const key = [...state.selectedDates][0];
+      defaultName = isRegion ? `${sourceKey}_${key}_region.pww` : `${sourceKey}_${key}.pww`;
+    } else {
+      const suffix = isRegion ? 'region_bundle' : 'bundle';
+      defaultName = `${sourceKey}_${suffix}_${count}_files.zip`;
+    }
+    _triggerBlobDownload(blob, filename || defaultName);
   } catch (err) {
     showDownloadError(`Download failed: ${err.message}`);
   } finally {

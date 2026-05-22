@@ -33,8 +33,8 @@ _FILENAME_PATTERNS: dict[str, str] = {
     "noaa_forecast": "Forecast_NorthAmerica_Run{key}.pww",
     "noaa_forecast_recent": "Forecast_NorthAmerica_Run{key}.pww",
     "noaa_forecast_archive": "Forecast_NorthAmerica_Run{key}.pww",
-    "era5_na": "ERA5_NorthAmerica_{key}.zip",
-    "era5_tx": "ERA5_Texas_{key}.zip",
+    "era5_na": "ERA5_NorthAmerica_{key}.pww",
+    "era5_tx": "ERA5_Texas_{key}.pww",
 }
 
 
