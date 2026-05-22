@@ -201,11 +201,19 @@ def _unzip_pww_to_tmp(zip_path: str) -> str:
     return path
 
 
-def fetch_and_crop(source: str, date_key: str, bbox: tuple, catalog: dict) -> bytes:
-    """Download, optionally unzip, crop, and return cropped PWW bytes.
+def fetch_and_crop(
+    source: str,
+    date_key: str,
+    bbox: tuple,
+    catalog: dict,
+    t_start: float | None = None,
+    t_end: float | None = None,
+) -> bytes:
+    """Download, optionally unzip, spatial-crop, optionally time-crop, and return PWW bytes.
 
     Uses /tmp for all intermediate files so only the final cropped array
     (~few MB) lives in RAM at any point.
+    t_start / t_end are Unix epoch seconds; omit to keep all time steps.
     """
     import pww_io, os
     tmp_dl = None
@@ -224,6 +232,12 @@ def fetch_and_crop(source: str, date_key: str, bbox: tuple, catalog: dict) -> by
         os.unlink(tmp_pww); tmp_pww = None
 
         header, stations, arr = pww_io.crop_to_bbox(header, stations, arr, bbox)
+
+        if t_start is not None or t_end is not None:
+            ts = t_start if t_start is not None else header["date_min"]
+            te = t_end if t_end is not None else header["date_max"]
+            header, arr = pww_io.crop_to_timerange(header, arr, ts, te)
+
         return pww_io.write_pww(header, stations, arr)
     except HTTPException:
         raise

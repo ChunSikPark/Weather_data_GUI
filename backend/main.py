@@ -176,6 +176,8 @@ async def download_region(
     region_layer: str | None = Query(None),
     region_ids: str | None = Query(None),
     bbox: str | None = Query(None),
+    time_start: str | None = Query(None, description="ISO datetime, e.g. 2026-05-21T06:00:00"),
+    time_end: str | None = Query(None, description="ISO datetime, e.g. 2026-05-21T18:00:00"),
 ):
     have_ids = bool(region_ids and region_ids.strip())
     have_bbox = bool(bbox and bbox.strip())
@@ -217,6 +219,19 @@ async def download_region(
             },
         )
 
+    def _parse_iso_to_epoch(s: str, param: str) -> float:
+        from datetime import datetime, timezone
+        try:
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid {param}: {s!r} (use ISO format, e.g. 2026-05-21T06:00:00)")
+
+    t_start_epoch = _parse_iso_to_epoch(time_start, "time_start") if time_start else None
+    t_end_epoch = _parse_iso_to_epoch(time_end, "time_end") if time_end else None
+
     date_keys = download_module.parse_dates_param(dates)
     loop = asyncio.get_running_loop()
     catalog_data = await loop.run_in_executor(None, catalog_module.get_catalog)
@@ -224,7 +239,8 @@ async def download_region(
     async with _region_sem:
         if len(date_keys) == 1:
             pww_bytes = await loop.run_in_executor(
-                None, download_module.fetch_and_crop, source, date_keys[0], resolved, catalog_data
+                None, download_module.fetch_and_crop, source, date_keys[0], resolved, catalog_data,
+                t_start_epoch, t_end_epoch,
             )
             filename = f"{source}_{date_keys[0]}_{region_tag}.pww"
             return Response(
@@ -243,7 +259,8 @@ async def download_region(
                 for key in date_keys:
                     try:
                         pww_bytes = await loop.run_in_executor(
-                            None, download_module.fetch_and_crop, source, key, resolved, catalog_data
+                            None, download_module.fetch_and_crop, source, key, resolved, catalog_data,
+                            t_start_epoch, t_end_epoch,
                         )
                         zf.writestr(f"{source}_{key}_{region_tag}.pww", pww_bytes)
                         del pww_bytes

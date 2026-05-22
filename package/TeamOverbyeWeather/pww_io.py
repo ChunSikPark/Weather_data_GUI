@@ -135,8 +135,9 @@ def crop_to_bbox(header: dict, stations: list, arr: np.ndarray, region: tuple) -
 
 
 def write_pww(header: dict, stations: list, arr: np.ndarray) -> bytes:
-    """Write a VERSION 2 PWW binary to bytes."""
+    """Write a PWW binary to bytes, preserving the original version and magic numbers."""
     count, varcount, _n_lat, _n_lon = arr.shape
+    version = header.get("version", 2)
     loc = len(stations)
 
     sta_buf = bytearray()
@@ -148,28 +149,60 @@ def write_pww(header: dict, stations: list, arr: np.ndarray) -> bytes:
         sta_buf += s["country"].encode("ascii", errors="replace") + b"\x00"
         sta_buf += s["region"].encode("ascii", errors="replace") + b"\x00"
 
+    meta_strings = header.get("meta_strings") or []
+
     f = io.BytesIO()
-    f.write(struct.pack("<h", 2001))
-    f.write(struct.pack("<h", 8066))
-    f.write(struct.pack("<h", 2))
+    f.write(struct.pack("<h", header["key1"]))
+    f.write(struct.pack("<h", header["key2"]))
+    f.write(struct.pack("<h", version))
     f.write(struct.pack("<d", header["date_min"]))
     f.write(struct.pack("<d", header["date_max"]))
     f.write(struct.pack("<d", header["lat_min"]))
     f.write(struct.pack("<d", header["lat_max"]))
     f.write(struct.pack("<d", header["lon_min"]))
     f.write(struct.pack("<d", header["lon_max"]))
-    f.write(struct.pack("<h", 1))
-    f.write(b"PowerWorld Timestep Simulation Weather\x00")
+    f.write(struct.pack("<h", len(meta_strings)))
+    for s in meta_strings:
+        f.write(s.encode("ascii", errors="replace") + b"\x00")
     f.write(struct.pack("<i", count))
     f.write(struct.pack("<i", header["sample_sec"]))
     f.write(struct.pack("<i", loc))
-    f.write(struct.pack("<h", 0))
+    f.write(struct.pack("<h", header.get("loc_fc", 0)))
     f.write(struct.pack("<h", varcount))
     for code in header["var_codes"]:
         f.write(struct.pack("<h", code))
-    f.write(struct.pack("<h", varcount))
-    for i in range(varcount):
-        f.write(struct.pack("<i", int((arr[:, i, :, :] != 255).sum())))
+    if version >= 2:
+        f.write(struct.pack("<h", varcount))
+        for i in range(varcount):
+            f.write(struct.pack("<i", int((arr[:, i, :, :] != 255).sum())))
     f.write(sta_buf)
     f.write(arr.tobytes())
     return f.getvalue()
+
+
+def crop_to_timerange(header: dict, arr: np.ndarray, t_start: float, t_end: float) -> tuple[dict, np.ndarray]:
+    """Crop the time axis of a PWW array to [t_start, t_end] (Unix epoch seconds).
+
+    Returns (new_header, cropped_arr).  Raises ValueError if no time steps fall
+    within the range.
+    """
+    date_min = header["date_min"]
+    sample_sec = header["sample_sec"]
+    count = arr.shape[0]
+
+    i_start = max(0, round((t_start - date_min) / sample_sec))
+    i_end = min(count, round((t_end - date_min) / sample_sec) + 1)
+
+    if i_start >= i_end:
+        raise ValueError(
+            f"No time steps in range [{t_start}, {t_end}]; "
+            f"file covers [{date_min}, {header['date_max']}]"
+        )
+
+    cropped = arr[i_start:i_end].copy()
+    new_date_min = date_min + i_start * sample_sec
+    new_date_max = date_min + (i_end - 1) * sample_sec
+
+    new_header = dict(header)
+    new_header.update(date_min=new_date_min, date_max=new_date_max)
+    return new_header, cropped
