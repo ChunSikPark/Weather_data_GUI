@@ -30,5 +30,11 @@ Thumbs.db
 # Docker
 *.log
 
-# OMC state
-.omc/state/
+# OMC state and tooling
+.omc/
+
+# Claude Code local settings
+.claude/
+
+# Downloaded data files
+data/
