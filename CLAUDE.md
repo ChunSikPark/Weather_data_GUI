@@ -6,8 +6,10 @@ Project context for AI agents working on this repo. Read this before touching co
 
 A weather data download portal for Texas A&M Team Overbye research. Users browse and download weather datasets (ERA5, HRRR, NOAA/GFS) that live as files in Google Drive folders. The backend exposes a catalog/download API; the frontend is a static site.
 
-- **Backend**: FastAPI (Python), deployed on Railway → `https://weatherdatagui-production.up.railway.app`
+- **Backend**: FastAPI (Python), deployed on Railway → `https://weather-data-gui.up.railway.app`
+  (Railway service Root Directory MUST be `backend` or the build falls back to Railpack and fails — the Dockerfile is at `backend/Dockerfile`. The frontend's `window.API_BASE` in `frontend/index.html` must point at this URL.)
 - **Frontend**: Static HTML/JS/CSS, deployed on Cloudflare Pages → `https://weather-data-gui.pages.dev`
+  (Pages project: Production branch `main`, Build output dir `frontend`, no build command. Auto-deploys on push.)
 - **Data**: Google Drive (service account, read-only)
 - **SDK**: `TeamOverbyeWeather` Python package on PyPI (in `package/`)
 - **Repo**: https://github.com/ChunSikPark/Weather_data_GUI
@@ -158,7 +160,13 @@ Returns 400 if both/neither of `region_ids`/`bbox` are given. Returns 413 with `
 
 9. **`_FILENAME_PATTERNS` extension MUST match the actual Drive file format.** If the suggested filename says `.zip` but the bytes are bare `.pww`, the user's PWW viewer rejects the extracted file. ERA5 and NOAA single files are `.pww`; HRRR single files are `.zip` (containing one `.pww`). Inside a multi-file ZIP bundle, each entry inherits this same naming, so getting it right matters in both single and bundle contexts.
 
-10. **Concurrency caps protect the worker from threadpool starvation and `/tmp` exhaustion.** `_single_dl_sem(4)` caps simultaneous single-file Drive streams; `_region_sem(1)` serializes region crops; `_download_sem(1)` serializes multi-file ZIP builds. The single-file semaphore wraps the streaming generator (not just the route handler) so the cap holds for the full duration of the transfer.
+10. **Downloads run behind bounded queues (`_Gate` in `main.py`) — load-shed, not just serialize.** Each heavy path has a `_Gate(concurrency, max_wait)`: a few requests run at once, the rest queue, and once more than `max_wait` are already waiting the gate raises **HTTP 503 + `Retry-After`** instead of piling up unbounded (which would exhaust RAM/connections). Three gates, all env-tunable **without a code change** (set the var on Railway + restart):
+    - `_single_gate` — single-file Drive streams — `SINGLE_CONCURRENCY` (default 6)
+    - `_region_gate` — region crops (RAM-heavy mmap) — `REGION_CONCURRENCY` (default 2)
+    - `_download_gate` — multi-file ZIP builds — `BUNDLE_CONCURRENCY` (default 2)
+    - `MAX_DOWNLOAD_QUEUE` (default 50) — max waiters per gate before 503.
+
+    Defaults are tuned for the **8 GB** Railway plan. For streaming responses the slot is acquired BEFORE the `StreamingResponse` is returned and released in the generator's `finally`, so the cap holds for the whole transfer (a plain `async with` inside the generator would release too early / after headers are already sent). If you see OOM under load, drop `REGION_CONCURRENCY=1` first — region crops are the heaviest path.
 
 11. **`_fetch_drive_to_tmp` must clean up its temp file on any error** — a Drive error mid-download otherwise orphans a multi-GB `/tmp` file with no reaper. Wrap the body in `try: ... except BaseException: os.unlink(path); raise`.
 
@@ -173,9 +181,11 @@ Auto-deploys on push to `main`. Build output dir = `frontend`. No build step.
 
 **Option A: Railway (current)**
 
-Railway auto-deploys on push to `main` (~90s). Verify with `curl /api/health` then `curl /api/debug/folders`.
-Env vars needed: `GDRIVE_CREDENTIALS_JSON_CONTENT`, `CORS_ORIGINS=https://weather-data-gui.pages.dev`.
-Note: Railway Starter plan has 512 MB RAM — the backend is tuned for this limit (semaphores prevent concurrent OOM). NOAA folder env vars on Railway are stale; ignore them (folder IDs are hardcoded in `catalog.py`).
+Railway auto-deploys on push to `main` (~90s). URL: `https://weather-data-gui.up.railway.app`.
+Verify with `curl <url>/api/health`, then `curl <url>/api/debug/folders`, then `curl <url>/api/catalog/refresh` (cache is 30 min).
+**Service Root Directory MUST be `backend`** (Settings → Source) — the Dockerfile lives at `backend/Dockerfile`; if root dir is blank Railway analyzes the repo root, finds no Dockerfile, falls back to Railpack, and dies with "Script start.sh not found". Set the builder to Dockerfile if it doesn't auto-switch.
+Env vars needed: `GDRIVE_CREDENTIALS_JSON_CONTENT` (full service-account JSON as a string), `CORS_ORIGINS=https://weather-data-gui.pages.dev`. Optional concurrency knobs: `REGION_CONCURRENCY`, `BUNDLE_CONCURRENCY`, `SINGLE_CONCURRENCY`, `MAX_DOWNLOAD_QUEUE` (see Painful lesson #10).
+Note: now on the **8 GB** plan (was 512 MB). The `_Gate` queues are tuned for 8 GB; dial the env knobs if load changes. Do NOT set any `GDRIVE_*_FOLDER_ID` vars — Railway's are stale; folder IDs are hardcoded/defaulted in `catalog.py`.
 
 The pipeline status indicator will read `unknown` for every source on Railway because the `config/alert_state.json` file produced by the weather-auto pipelines is not available there. This is cosmetic — the data API works regardless.
 

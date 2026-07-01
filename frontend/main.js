@@ -1588,6 +1588,10 @@ function updateTimeCropPanel() {
     note.classList.remove('hidden');
     inputs.classList.add('hidden');
     inputs.querySelectorAll('input, select').forEach(el => { el.disabled = true; });
+    // Clear any armed bounds so a disabled panel can't leak a stale time window
+    // into buildDownloadURL (e.g. switching from a past quarter to the latest,
+    // in-progress quarter where time crop is unavailable).
+    state.selectedTimeCrop = { start: null, end: null };
   };
 
   if (count !== 1) {
