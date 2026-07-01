@@ -57,12 +57,60 @@ app.add_middleware(
     expose_headers=["Content-Disposition", "Content-Length"],
 )
 
-# Serialize region-crop work so concurrent requests can't OOM the Railway worker.
-_region_sem = asyncio.Semaphore(1)
-# Serialize regular multi-file ZIP builds to cap peak /tmp usage.
-_download_sem = asyncio.Semaphore(1)
-# Cap concurrent single-file downloads to prevent threadpool starvation under load.
-_single_dl_sem = asyncio.Semaphore(4)
+def _int_env(key: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ.get(key, default)))
+    except (TypeError, ValueError):
+        return default
+
+
+class _Gate:
+    """Concurrency limiter with a bounded wait queue.
+
+    Up to ``concurrency`` requests run at once; the rest queue.  If more than
+    ``max_wait`` are already waiting, new arrivals are rejected with HTTP 503
+    (+ Retry-After) instead of piling up unbounded — this is what stops a burst
+    of simultaneous downloads from exhausting RAM and open connections.
+    """
+
+    def __init__(self, concurrency: int, max_wait: int) -> None:
+        self._sem = asyncio.Semaphore(concurrency)
+        self._max_wait = max_wait
+        self._waiting = 0
+
+    async def acquire(self, what: str) -> None:
+        if self._waiting >= self._max_wait:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Server busy — too many {what}s queued. Please retry in a few seconds.",
+                headers={"Retry-After": "15"},
+            )
+        self._waiting += 1
+        try:
+            await self._sem.acquire()
+        finally:
+            self._waiting -= 1
+
+    def release(self) -> None:
+        self._sem.release()
+
+    @asynccontextmanager
+    async def slot(self, what: str):
+        await self.acquire(what)
+        try:
+            yield
+        finally:
+            self.release()
+
+
+# Concurrency tuned for the 8 GB Railway plan; override via env without a redeploy.
+# Region crops mmap a full grid (tens of MB peak each); ZIP builds stream file-by-file;
+# single downloads stream in 8 MB chunks (cheap).  MAX_DOWNLOAD_QUEUE bounds how many
+# requests may wait per gate before the server sheds load with a 503.
+_MAX_QUEUE = _int_env("MAX_DOWNLOAD_QUEUE", 50)
+_region_gate = _Gate(_int_env("REGION_CONCURRENCY", 2), _MAX_QUEUE)
+_download_gate = _Gate(_int_env("BUNDLE_CONCURRENCY", 2), _MAX_QUEUE)
+_single_gate = _Gate(_int_env("SINGLE_CONCURRENCY", 6), _MAX_QUEUE)
 
 
 @app.get("/api/health")
@@ -161,12 +209,16 @@ async def download(
         if size:
             headers["Content-Length"] = str(size)
 
+        # Admit (or 503) before streaming so waiters can't pile up unbounded.
+        # The slot is held for the whole transfer and released when it finishes.
+        await _single_gate.acquire("download")
+
         async def _capped_stream():
-            # Hold semaphore for the entire stream so threadpool workers aren't starved
-            # by more than 4 concurrent Drive downloads.
-            async with _single_dl_sem:
+            try:
                 async for chunk in iterate_in_threadpool(download_module.stream_drive_file(file_id)):
                     yield chunk
+            finally:
+                _single_gate.release()
 
         return StreamingResponse(
             _capped_stream(),
@@ -174,7 +226,7 @@ async def download(
             headers=headers,
         )
 
-    async with _download_sem:
+    async with _download_gate.slot("bundle"):
         entries = download_module.collect_entries(source, date_keys, catalog_data)
 
         def _build() -> str:
@@ -291,25 +343,29 @@ async def download_region(
     loop = asyncio.get_running_loop()
     catalog_data = await loop.run_in_executor(None, catalog_module.get_catalog)
 
-    async with _region_sem:
-        if len(date_keys) == 1:
+    if len(date_keys) == 1:
+        async with _region_gate.slot("region crop"):
             pww_bytes = await loop.run_in_executor(
                 None, download_module.fetch_and_crop, source, date_keys[0], resolved, catalog_data,
                 t_start_epoch, t_end_epoch,
             )
-            filename = f"{source}_{date_keys[0]}_{region_tag}{ttag}.pww"
-            return Response(
-                content=pww_bytes,
-                media_type="application/octet-stream",
-                headers={
-                    "Content-Disposition": f'attachment; filename="{filename}"',
-                    "Content-Length": str(len(pww_bytes)),
-                },
-            )
+        filename = f"{source}_{date_keys[0]}_{region_tag}{ttag}.pww"
+        return Response(
+            content=pww_bytes,
+            media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(pww_bytes)),
+            },
+        )
 
-        filename = f"{source}_{region_tag}{ttag}_bundle_{len(date_keys)}_files.zip"
+    # Multi-date bundle: hold a slot for the entire streamed build so concurrent
+    # crops can't stack in RAM; excess requests are shed with a 503 at acquire().
+    await _region_gate.acquire("region bundle")
+    filename = f"{source}_{region_tag}{ttag}_bundle_{len(date_keys)}_files.zip"
 
-        async def _stream_zip():
+    async def _stream_zip():
+        try:
             fd, zip_path = tempfile.mkstemp(suffix=".zip", dir="/tmp")
             os.close(fd)
             try:
@@ -341,9 +397,11 @@ async def download_region(
                     os.unlink(zip_path)
                 except OSError:
                     pass
+        finally:
+            _region_gate.release()
 
-        return StreamingResponse(
-            _stream_zip(),
-            media_type="application/zip",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        )
+    return StreamingResponse(
+        _stream_zip(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
