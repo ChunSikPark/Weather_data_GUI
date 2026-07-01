@@ -113,6 +113,8 @@ async def debug_folders() -> JSONResponse:
         "hrrr_forecast":        catalog_module._folder_id("GDRIVE_HRRR_FORECAST_FOLDER_ID", "hrrr_forecast"),
         "hrrr_history_main":    catalog_module._folder_id("GDRIVE_HRRR_HISTORY_FOLDER_ID", "hrrr_history_main"),
         "hrrr_history_archive": catalog_module._folder_id("GDRIVE_HRRR_HISTORY_ARCHIVE_FOLDER_ID", "hrrr_history_archive"),
+        "hrrr_history_hourly_main":    catalog_module._folder_id("GDRIVE_HRRR_HISTORY_HOURLY_FOLDER_ID", "hrrr_history_hourly_main"),
+        "hrrr_history_hourly_archive": catalog_module._folder_id("GDRIVE_HRRR_HISTORY_HOURLY_ARCHIVE_FOLDER_ID", "hrrr_history_hourly_archive"),
         "era5_quarterly":       catalog_module._folder_id("GDRIVE_ERA5_QUARTERLY_FOLDER_ID", "era5_quarterly"),
         "era5_history_zip":     catalog_module._folder_id("GDRIVE_ERA5_HISTORY_ZIP_FOLDER_ID", "era5_history_zip"),
         "era5_archive":         catalog_module._folder_id("GDRIVE_ERA5_ARCHIVE_FOLDER_ID", "era5_archive"),
@@ -249,7 +251,7 @@ async def download_region(
     region_tag = "+".join(ids) if have_ids else "custom"
 
     area = (resolved[0] - resolved[2]) * (resolved[3] - resolved[1])
-    if area >= 2380 and source in ("hrrr_history", "hrrr_history_archive"):
+    if area >= 2380 and source in ("hrrr_history", "hrrr_history_archive", "hrrr_history_hourly_archive"):
         raise HTTPException(
             status_code=413,
             detail={

@@ -189,6 +189,34 @@ def crop_to_bbox(header: dict, stations: list, arr: np.ndarray, region: tuple) -
     return new_header, new_stations, cropped
 
 
+def concat_time(pieces: list) -> tuple[dict, list, np.ndarray]:
+    """Concatenate several (header, stations, arr) PWW pieces along the time axis.
+
+    Used to reassemble the four 6-hour quarter PWWs inside a HRRR-history daily
+    zip into one full-day array.  Pieces must share grid shape, varcount,
+    var_codes and sample_sec, and be supplied in ascending time order.  The
+    returned header spans date_min..date_max of all pieces; ``write_pww``
+    recomputes VERSION 2 valid-counts from the concatenated array, so no
+    per-timestep bookkeeping is carried here.
+    """
+    if not pieces:
+        raise ValueError("no PWW pieces to concatenate")
+    if len(pieces) == 1:
+        return pieces[0]
+
+    headers = [p[0] for p in pieces]
+    arr = np.concatenate([p[2] for p in pieces], axis=0)
+
+    new_header = dict(headers[0])
+    new_header.update(
+        count=int(arr.shape[0]),
+        date_min=min(h["date_min"] for h in headers),
+        date_max=max(h["date_max"] for h in headers),
+    )
+    # Stations are identical across quarters — keep the first piece's list.
+    return new_header, pieces[0][1], arr
+
+
 def write_pww(header: dict, stations: list, arr: np.ndarray) -> bytes:
     """Write a PWW binary to bytes, preserving the original version and magic numbers."""
     count, varcount, _n_lat, _n_lon = arr.shape

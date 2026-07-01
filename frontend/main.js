@@ -84,16 +84,30 @@ const TYPE_DEFS = {
     {
       key: 'current',
       icon: '📅',
-      name: 'Current Year',
-      tag: 'Current',
-      desc: 'This year\'s monthly HRRR archives, CONUS',
+      name: 'Current Year · 15-min',
+      tag: '15-min',
+      desc: 'This year\'s daily HRRR history, 15-minute steps, CONUS',
     },
     {
       key: 'archive',
       icon: '🗄️',
-      name: 'Archives',
+      name: 'Archive · 15-min',
       tag: 'Archive',
-      desc: 'Past years\' monthly HRRR archives',
+      desc: 'Past years\' monthly HRRR history bundles, 15-minute steps',
+    },
+    {
+      key: 'hourly_current',
+      icon: '📅',
+      name: 'Current Year · Hourly',
+      tag: 'Hourly',
+      desc: 'This year\'s daily HRRR history, hourly steps, CONUS',
+    },
+    {
+      key: 'hourly_archive',
+      icon: '🗄️',
+      name: 'Archive · Hourly',
+      tag: 'Archive',
+      desc: 'Past years\' monthly HRRR history bundles, hourly steps',
     },
     {
       key: 'forecast',
@@ -130,6 +144,8 @@ function getApiSourceKey() {
   if (selectedSource === 'hrrr') {
     if (selectedType === 'current') return 'hrrr_history_current';
     if (selectedType === 'archive') return 'hrrr_history_archive';
+    if (selectedType === 'hourly_current') return 'hrrr_history_hourly_current';
+    if (selectedType === 'hourly_archive') return 'hrrr_history_hourly_archive';
     return 'hrrr_forecast';
   }
   if (selectedSource === 'noaa') {
@@ -360,6 +376,10 @@ function renderStep3() {
     renderDayPicker('hrrr_history_current');
   } else if (selectedSource === 'hrrr' && selectedType === 'archive') {
     renderMonthPicker('hrrr_history_archive');
+  } else if (selectedSource === 'hrrr' && selectedType === 'hourly_current') {
+    renderDayPicker('hrrr_history_hourly_current');
+  } else if (selectedSource === 'hrrr' && selectedType === 'hourly_archive') {
+    renderMonthPicker('hrrr_history_hourly_archive');
   } else if (selectedSource === 'hrrr' && selectedType === 'forecast') {
     renderCyclePicker('hrrr_forecast');
   } else if (selectedSource === 'noaa' && selectedType === 'recent') {
@@ -841,8 +861,10 @@ function updateDownloadBar() {
   if (selectedSource === 'era5') {
     sourceLabel = `ERA5 ${selectedRegion === 'tx' ? 'Texas' : 'North America'}`;
   } else if (selectedSource === 'hrrr') {
-    if (selectedType === 'current') sourceLabel = 'HRRR Historical (Current Year)';
-    else if (selectedType === 'archive') sourceLabel = 'HRRR Historical (Archive)';
+    if (selectedType === 'current') sourceLabel = 'HRRR Historical 15-min (Current Year)';
+    else if (selectedType === 'archive') sourceLabel = 'HRRR Historical 15-min (Archive)';
+    else if (selectedType === 'hourly_current') sourceLabel = 'HRRR Historical Hourly (Current Year)';
+    else if (selectedType === 'hourly_archive') sourceLabel = 'HRRR Historical Hourly (Archive)';
     else sourceLabel = 'HRRR Forecast';
   } else if (selectedSource === 'noaa') {
     sourceLabel = selectedType === 'archive' ? 'NOAA / GFS Archive' : 'NOAA / GFS Recent';
@@ -853,7 +875,7 @@ function updateDownloadBar() {
   let datesLabel = '';
   if (selectedSource === 'era5') {
     datesLabel = sortedDates.join(', ');
-  } else if (selectedSource === 'hrrr' && selectedType === 'current') {
+  } else if (selectedSource === 'hrrr' && (selectedType === 'current' || selectedType === 'hourly_current')) {
     datesLabel = sortedDates.map((d) => {
       if (d.length === 10) {
         const p = parseMonth(d.slice(0, 7));
@@ -863,7 +885,7 @@ function updateDownloadBar() {
       const p = parseMonth(d);
       return p ? `${MONTHS_SHORT[p.month - 1]} ${p.year}` : d;
     }).join(', ');
-  } else if (selectedSource === 'hrrr' && selectedType === 'archive') {
+  } else if (selectedSource === 'hrrr' && (selectedType === 'archive' || selectedType === 'hourly_archive')) {
     datesLabel = sortedDates.map((d) => {
       const p = parseMonth(d);
       return p ? `${MONTHS_SHORT[p.month - 1]} ${p.year}` : d;

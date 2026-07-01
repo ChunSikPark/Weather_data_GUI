@@ -43,8 +43,10 @@ These IDs are **hardcoded directly in `_build_noaa()`** because Railway has stal
 | ERA5 history zip | `1O8VjwFKXCJ3DR56_UEep-rXyb7OHNGMZ` | quarter-tagged ZIPs |
 | ERA5 archive | `1PD_y38k6x8HjDR8Wv-15NsZ6pdZ9pVPz` | quarter-tagged ZIPs |
 | HRRR forecast | `1yuEH5020Nh-Km5_PvYfmVpWTQIhzI1Iz` | `YYYY-MM-DDTHHZ_sfc_48_CONUS.zip` |
-| HRRR history (current year, daily) | `1Uc-tuSPEnh7rJzC3nFvxndFvULrsNe-U` | `CONUS_YYYY_MM_DD.zip` (or `.pww.gz`) |
-| HRRR history (archive, monthly) | `1_govjuY2WV0TqHp_7PwVVtrGPCDU-I9v` | `CONUSYYYY_MM.zip` or `CONUSYYYY_MM.pww.gz` |
+| HRRR history 15-min (current year, daily) | `1y6-08xMbNUYX9coEYWZsCHTo3GYn8yNj` | `YYYY-MM-DD_subh_15min_CONUS.zip` (holds 4 quarter `.pww`) |
+| HRRR history 15-min (archive, monthly) | `1sGBshGAmcpFVHRg5pGtrd5TSlsOGKqL6` | `YYYY-MM_subh_15min_CONUS.zip` (nested daily zips) |
+| HRRR history hourly (current year, daily) | `1ASjkTa_EHfWbkXDpVwwX8vM13YkZ2KAK` | `YYYY-MM-DD_hourly_CONUS.pww` (bare `.pww`) |
+| HRRR history hourly (archive, monthly) | `1jkkzUCtxVoKZ9MLfSCV2rLH761Jd3Qou` | `YYYY-MM_hourly_CONUS.zip` |
 | NOAA recent | `1kAOe-dGHByzZHijHGo8rmL7x4KY6OMav` | `Forecast_NorthAmerica_RunYYYY-MM-DDTHHZ.pww` |
 | NOAA archive | `1TTa-bDV88sSf4strSW649UHPRddMHJtr` | same as above |
 
@@ -57,9 +59,11 @@ The service account email from `service_account.json`'s `client_email` field MUS
   "era5_na":               { "quarters": [...], "file_ids": {...} },
   "era5_tx":               { "quarters": [...], "file_ids": {...} },
   "hrrr_forecast":         { "cycles":   [...], "file_ids": {...} },
-  "hrrr_history":          { "months":   [...], "file_ids": {...} },  // legacy combined
-  "hrrr_history_current":  { "days":     [...], "file_ids": {...} },  // YYYY-MM-DD keys
-  "hrrr_history_archive":  { "months":   [...], "file_ids": {...} },  // YYYY-MM keys
+  "hrrr_history":          { "months":   [...], "file_ids": {...} },  // legacy combined (15-min)
+  "hrrr_history_current":  { "days":     [...], "file_ids": {...} },  // 15-min, YYYY-MM-DD keys
+  "hrrr_history_archive":  { "months":   [...], "file_ids": {...} },  // 15-min, YYYY-MM keys
+  "hrrr_history_hourly_current": { "days":   [...], "file_ids": {...} },  // hourly, YYYY-MM-DD keys
+  "hrrr_history_hourly_archive": { "months": [...], "file_ids": {...} },  // hourly, YYYY-MM keys
   "noaa_forecast":         { "cycles":   [...], "file_ids": {...} },  // legacy combined
   "noaa_forecast_recent":  { "cycles":   [...], "file_ids": {...} },  // from main folder
   "noaa_forecast_archive": { "cycles":   [...], "file_ids": {...} }   // from archive folder
@@ -77,7 +81,7 @@ Date key formats:
 1. **Step 1 — Source**: ERA5 / HRRR / NOAA cards.
 2. **Step 2 — Type**: per-source sub-types defined in `TYPE_DEFS` in `main.js`:
    - ERA5: `historical`
-   - HRRR: `current` | `archive` | `forecast`
+   - HRRR: `current` (15-min daily) | `archive` (15-min monthly) | `hourly_current` (hourly daily) | `hourly_archive` (hourly monthly) | `forecast`
    - NOAA: `recent` | `archive`
 3. **Step 3 — Dates**: picker is selected by `renderStep3()` based on (source, type):
    - `renderQuarterPicker()` — ERA5 (with From/To range selector)
@@ -114,12 +118,12 @@ The two debug endpoints are gold for diagnosing "data not showing" issues — al
 | `region_ids` | one of | Comma-separated postal codes or ISO zone IDs |
 | `bbox` | one of | `lat_max,lon_min,lat_min,lon_max` floats (custom layer) |
 
-Returns 400 if both/neither of `region_ids`/`bbox` are given. Returns 413 with `{"sdk_hint":"..."}` if bbox area ≥ 2380 sq-deg and source is `hrrr_history` or `hrrr_history_archive` (CONUS-scale request — use SDK local crop instead).
+Returns 400 if both/neither of `region_ids`/`bbox` are given. Returns 413 with `{"sdk_hint":"..."}` if bbox area ≥ 2380 sq-deg and source is `hrrr_history`, `hrrr_history_archive`, or `hrrr_history_hourly_archive` (CONUS-scale request — use SDK local crop instead). Nested monthly-archive zips also 413 regardless of area (the crop path can't unzip a zip-of-zips).
 
 ## Region crop system
 
 - **`backend/regions.py`**: 51-state bbox dict (hardcoded, keyed by 2-letter postal code) + ISO zones loaded from `D:\Research_Projects\Inputs\Shape_Files\ISO_REGIONS\ISO_Regions_cleaned.shp` via `pyshp`. Alaska clipped to `(71.4, -180.0, 51.2, -129.9)` to avoid antimeridian union issues.
-- **`backend/pww_io.py`**: `read_pww(bytes)`, `read_pww_file(path)` (mmap, low RAM), `crop_to_bbox(header, stations, arr, bbox_tuple)`, `write_pww(header, stations, arr)`. Longitude axis descends (east→west), 255 = NaN sentinel. Always `.copy()` after slicing. **Only HRRR files are ZIPs** containing a `.pww` inside; ERA5 and NOAA files are bare `.pww` (VERSION 1 until automation is updated to VERSION 2). The crop pipeline streams Drive files to `/tmp` and mmaps them to keep peak RAM ~64 MB.
+- **`backend/pww_io.py`**: `read_pww(bytes)`, `read_pww_file(path)` (mmap, low RAM), `crop_to_bbox(header, stations, arr, bbox_tuple)`, `write_pww(header, stations, arr)`. Longitude axis descends (east→west), 255 = NaN sentinel. Always `.copy()` after slicing. File shape is detected by content, not source name: ERA5, NOAA, and **hourly** HRRR history are bare `.pww`; HRRR forecast is a zip with one `.pww`; HRRR history **15-min daily** is a zip with four quarter `.pww` (stitched via `concat_time`). NOAA/HRRR are now VERSION 2; ERA5 still VERSION 1 — `pww_io` reads both. The crop pipeline streams Drive files to `/tmp` and mmaps them to keep peak RAM ~64 MB.
 - **ISO shapefile**: `.prj` is checked at startup. If it's a projected CRS (starts with `PROJCS[`) or lacks WGS84 datum, the module logs to stderr and `iso` returns `[]` — ISO tab shows empty list, no crash.
 - **Memory guard**: `asyncio.Semaphore(1)` on `/api/download/region` prevents concurrent crop ops on Railway's 512 MB container. CONUS-scale HRRR archive requests are blocked at 413 — use `client.hrrr.download_region()` which crops locally.
 - **SDK `download_region()`**: available on `HRRRClient`, `NOAAClient`, `ERA5Client`. HRRR archive + large bbox triggers `_local_crop()` (downloads per-month, unzips, crops with `pww_io` locally). `package/TeamOverbyeWeather/pww_io.py` is a copy of the backend module.
@@ -134,14 +138,17 @@ Returns 400 if both/neither of `region_ids`/`bbox` are given. Returns 413 with `
 
 3. **Drive folders can have subfolders**: `list_files()` recurses up to 4 levels deep. If you see "folder has files but catalog is empty", check the regex first, then check folder access.
 
-4. **Filename conventions vary wildly between folders**:
-   - HRRR forecast: `2026-05-07T12Z_sfc_48_CONUS.zip` (date-prefix)
-   - HRRR history daily: `CONUS_2026_05_06.zip` (CONUS-prefix, underscores)
-   - HRRR history monthly: `CONUS2026_04.zip` (no underscore between CONUS and year) — also `.pww.gz` for older years
-   - NOAA: `Forecast_NorthAmerica_RunYYYY-MM-DDTHHZ.pww`
+4. **Filename conventions vary wildly between folders** (current `drive_uploader` refactor naming):
+   - HRRR forecast: `2026-05-07T12Z_sfc_48_CONUS.zip` (date-prefix, one `.pww` inside)
+   - HRRR history 15-min daily: `2026-05-06_subh_15min_CONUS.zip` — **holds FOUR quarter PWWs** `YYYY-MM-DD_Q{1..4}_subh_15min_CONUS.pww` (24×15-min steps each → 96/day). The crop path stitches them back with `pww_io.concat_time`.
+   - HRRR history 15-min monthly: `2026-05_subh_15min_CONUS.zip` — **nested** (holds ~30 daily zips); not croppable server-side (413 → SDK).
+   - HRRR history hourly daily: `2026-05-06_hourly_CONUS.pww` (**bare** `.pww`, not zipped)
+   - HRRR history hourly monthly: `2026-05_hourly_CONUS.zip`
+   - Legacy pre-refactor names (`CONUS_2026_05_06.zip`, `CONUS2026_04.pww.gz`) are still matched as a regex fallback.
+   - NOAA: `Forecast_NorthAmerica_RunYYYY-MM-DDTHHZ.pww` (now VERSION 2 PWW; `pww_io` reads v1 & v2)
    - **Always run `/api/debug/folder` to see actual filenames** before writing/changing a regex.
 
-5. **HRRR history regex is intentionally loose** on extension: `[A-Za-z0-9.]+$` matches `.zip`, `.pww.gz`, `.pww`, `.gz`. Don't tighten it to `\.zip$` — older archives are `.pww.gz`.
+5. **HRRR history regexes are intentionally loose** on extension: `[A-Za-z0-9.]+$` matches `.zip`, `.pww.gz`, `.pww`, `.gz`. Don't tighten to `\.zip$` — older archives are `.pww.gz`. `fetch_and_crop` detects the on-disk shape by content (`zipfile.is_zipfile`), NOT by source name, so bare-pww (hourly) and zipped (15-min) both work.
 
 6. **NOAA "Recent" vs "Archive" is folder-based, not date-based**. Earlier attempts at date-based splitting all failed because the dataset's "newness" doesn't match wall-clock time. Each tab pulls strictly from its own folder.
 

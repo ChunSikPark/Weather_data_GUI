@@ -17,6 +17,8 @@ _SOURCE_LOOKUP: dict[str, dict[str, str]] = {
     "hrrr_history": {"catalog_key": "hrrr_history", "list_key": "months"},
     "hrrr_history_current": {"catalog_key": "hrrr_history_current", "list_key": "days"},
     "hrrr_history_archive": {"catalog_key": "hrrr_history_archive", "list_key": "months"},
+    "hrrr_history_hourly_current": {"catalog_key": "hrrr_history_hourly_current", "list_key": "days"},
+    "hrrr_history_hourly_archive": {"catalog_key": "hrrr_history_hourly_archive", "list_key": "months"},
     "noaa_forecast": {"catalog_key": "noaa_forecast", "list_key": "cycles"},
     "noaa_forecast_recent": {"catalog_key": "noaa_forecast_recent", "list_key": "cycles"},
     "noaa_forecast_archive": {"catalog_key": "noaa_forecast_archive", "list_key": "cycles"},
@@ -27,9 +29,11 @@ _SOURCE_LOOKUP: dict[str, dict[str, str]] = {
 # Default download filename pattern per source.
 _FILENAME_PATTERNS: dict[str, str] = {
     "hrrr_forecast": "{key}_sfc_48_CONUS.zip",
-    "hrrr_history": "CONUS_{key}.zip",
-    "hrrr_history_current": "CONUS_{key}.zip",
-    "hrrr_history_archive": "CONUS_{key}.zip",
+    "hrrr_history": "{key}_subh_15min_CONUS.zip",
+    "hrrr_history_current": "{key}_subh_15min_CONUS.zip",
+    "hrrr_history_archive": "{key}_subh_15min_CONUS.zip",
+    "hrrr_history_hourly_current": "{key}_hourly_CONUS.pww",
+    "hrrr_history_hourly_archive": "{key}_hourly_CONUS.zip",
     "noaa_forecast": "Forecast_NorthAmerica_Run{key}.pww",
     "noaa_forecast_recent": "Forecast_NorthAmerica_Run{key}.pww",
     "noaa_forecast_archive": "Forecast_NorthAmerica_Run{key}.pww",
@@ -259,6 +263,52 @@ def _unzip_pww_to_tmp(zip_path: str) -> str:
     return path
 
 
+def _extract_pww_members(zip_path: str) -> list[str]:
+    """Extract every .pww member of a ZIP to /tmp, ordered by quarter then name.
+
+    Returns a list of /tmp paths (caller deletes each).  A HRRR-history daily
+    zip holds four quarter PWWs (``..._Q1..Q4_subh_15min_CONUS.pww``); a forecast
+    zip holds a single ``.pww``.  A monthly archive bundle whose members are
+    themselves ``.zip`` files (nested) can't be cropped server-side — raise 413
+    pointing at the SDK local-crop path instead.
+    """
+    import os, re, tempfile, shutil
+    with zipfile.ZipFile(zip_path) as zf:
+        names = zf.namelist()
+        pww_names = [n for n in names if n.lower().endswith(".pww")]
+        if not pww_names:
+            if any(n.lower().endswith(".zip") for n in names):
+                raise HTTPException(
+                    status_code=413,
+                    detail={
+                        "detail": "Monthly archive bundles can't be cropped server-side.",
+                        "sdk_hint": "Use client.hrrr.download_region(months=[...], bbox=..., dest='./data/') for local crop.",
+                    },
+                )
+            raise HTTPException(status_code=502, detail="No .pww file found inside ZIP")
+
+        def _q(n: str) -> int:
+            m = re.search(r"_Q(\d)_", n)
+            return int(m.group(1)) if m else 0
+
+        pww_names.sort(key=lambda n: (_q(n), n))
+        out: list[str] = []
+        try:
+            for n in pww_names:
+                fd, path = tempfile.mkstemp(suffix=".pww", dir="/tmp")
+                with os.fdopen(fd, "wb") as dst, zf.open(n) as src:
+                    shutil.copyfileobj(src, dst, length=8 * 1024 * 1024)
+                out.append(path)
+        except BaseException:
+            for p in out:
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+            raise
+    return out
+
+
 def fetch_and_crop(
     source: str,
     date_key: str,
@@ -269,27 +319,39 @@ def fetch_and_crop(
 ) -> bytes:
     """Download, optionally unzip, spatial-crop, optionally time-crop, and return PWW bytes.
 
+    Handles three on-disk shapes transparently (detected by content, not source
+    name): a bare ``.pww`` (ERA5, NOAA, hourly HRRR history), a zip with one
+    ``.pww`` (HRRR forecast), and a zip with four quarter ``.pww`` members (HRRR
+    history 15-min daily) — the quarters are cropped individually then stitched
+    back into one full-day array so no timesteps are dropped.
+
     Uses /tmp for all intermediate files so only the final cropped array
     (~few MB) lives in RAM at any point.
     t_start / t_end are Unix epoch seconds; omit to keep all time steps.
     """
     import pww_io, os
     tmp_dl = None
-    tmp_pww = None
+    tmp_members: list[str] = []
     try:
         file_id = get_file_id(source, date_key, catalog)
         tmp_dl = _fetch_drive_to_tmp(file_id)
 
-        if source.startswith("hrrr"):
-            tmp_pww = _unzip_pww_to_tmp(tmp_dl)
+        if zipfile.is_zipfile(tmp_dl):
+            tmp_members = _extract_pww_members(tmp_dl)
             os.unlink(tmp_dl); tmp_dl = None
+            # Crop each member to the bbox first (each cropped array is small),
+            # then concatenate along time — keeps peak RAM at one member.
+            pieces = []
+            for mp in tmp_members:
+                h, s, a = pww_io.read_pww_file(mp)
+                pieces.append(pww_io.crop_to_bbox(h, s, a, bbox))
+                os.unlink(mp)
+            tmp_members = []
+            header, stations, arr = pww_io.concat_time(pieces)
         else:
-            tmp_pww = tmp_dl; tmp_dl = None
-
-        header, stations, arr = pww_io.read_pww_file(tmp_pww)
-        os.unlink(tmp_pww); tmp_pww = None
-
-        header, stations, arr = pww_io.crop_to_bbox(header, stations, arr, bbox)
+            header, stations, arr = pww_io.read_pww_file(tmp_dl)
+            os.unlink(tmp_dl); tmp_dl = None
+            header, stations, arr = pww_io.crop_to_bbox(header, stations, arr, bbox)
 
         if t_start is not None or t_end is not None:
             ts = t_start if t_start is not None else header["date_min"]
@@ -306,7 +368,7 @@ def fetch_and_crop(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Processing failed: {exc}")
     finally:
-        for p in (tmp_dl, tmp_pww):
+        for p in [tmp_dl, *tmp_members]:
             if p:
                 try:
                     os.unlink(p)

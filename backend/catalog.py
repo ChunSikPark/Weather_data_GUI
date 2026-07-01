@@ -26,8 +26,13 @@ _CACHE_TTL = timedelta(minutes=30)
 
 _DEFAULT_FOLDERS = {
     "hrrr_forecast": "1yuEH5020Nh-Km5_PvYfmVpWTQIhzI1Iz",
-    "hrrr_history_main": "1Uc-tuSPEnh7rJzC3nFvxndFvULrsNe-U",
-    "hrrr_history_archive": "1_govjuY2WV0TqHp_7PwVVtrGPCDU-I9v",
+    # 15-min quarter product (drive_uploader HRRR_HIST_MAIN / HRRR_HIST_ARCHIVE).
+    # Repointed 2026-07 — the old IDs held the pre-refactor hourly CONUS files.
+    "hrrr_history_main": "1y6-08xMbNUYX9coEYWZsCHTo3GYn8yNj",
+    "hrrr_history_archive": "1sGBshGAmcpFVHRg5pGtrd5TSlsOGKqL6",
+    # Hourly product (drive_uploader HRRR_HIST_HOURLY_MAIN / HRRR_HIST_HOURLY_ARCHIVE).
+    "hrrr_history_hourly_main": "1ASjkTa_EHfWbkXDpVwwX8vM13YkZ2KAK",
+    "hrrr_history_hourly_archive": "1jkkzUCtxVoKZ9MLfSCV2rLH761Jd3Qou",
     "noaa_main": "1kAOe-dGHByzZHijHGo8rmL7x4KY6OMav",
     "noaa_archive": "1TTa-bDV88sSf4strSW649UHPRddMHJtr",
     "era5_main": "1jN1NP3b5Nby-gpy5w1rqe2cgctESxqO-",
@@ -52,6 +57,14 @@ def _credentials_path() -> str:
 # ---------------------------------------------------------------------------
 
 _RE_HRRR_FORECAST = re.compile(r"(\d{4}-\d{2}-\d{2})T(\d{2})Z_sfc_48_CONUS\.zip$", re.IGNORECASE)
+# Current 15-min product (drive_uploader): daily "YYYY-MM-DD_subh_15min_CONUS.zip",
+# monthly "YYYY-MM_subh_15min_CONUS.zip".
+_RE_HRRR_HIST15_DAY = re.compile(r"^(\d{4})-(\d{2})-(\d{2})_subh_15min_CONUS\.[A-Za-z0-9.]+$", re.IGNORECASE)
+_RE_HRRR_HIST15_MONTH = re.compile(r"^(\d{4})-(\d{2})_subh_15min_CONUS\.[A-Za-z0-9.]+$", re.IGNORECASE)
+# Hourly product: daily bare "YYYY-MM-DD_hourly_CONUS.pww", monthly "YYYY-MM_hourly_CONUS.zip".
+_RE_HRRR_HOURLY_DAY = re.compile(r"^(\d{4})-(\d{2})-(\d{2})_hourly_CONUS\.[A-Za-z0-9.]+$", re.IGNORECASE)
+_RE_HRRR_HOURLY_MONTH = re.compile(r"^(\d{4})-(\d{2})_hourly_CONUS\.[A-Za-z0-9.]+$", re.IGNORECASE)
+# Legacy pre-refactor names, kept as a fallback so any leftover files still list.
 _RE_HRRR_HISTORY_MONTH = re.compile(r"^CONUS_?(\d{4})_(\d{2})\.[A-Za-z0-9.]+$", re.IGNORECASE)
 _RE_HRRR_HISTORY_DAY = re.compile(r"^CONUS_(\d{4})_(\d{2})_(\d{2})\.[A-Za-z0-9.]+$", re.IGNORECASE)
 _RE_NOAA = re.compile(r"Forecast_NorthAmerica_Run(\d{4}-\d{2}-\d{2})T(\d{2})Z\.pww$", re.IGNORECASE)
@@ -184,6 +197,8 @@ def _empty_catalog() -> dict[str, dict[str, Any]]:
         "hrrr_history": {"months": [], "file_ids": {}},
         "hrrr_history_current": {"days": [], "file_ids": {}},
         "hrrr_history_archive": {"months": [], "file_ids": {}},
+        "hrrr_history_hourly_current": {"days": [], "file_ids": {}},
+        "hrrr_history_hourly_archive": {"months": [], "file_ids": {}},
         "noaa_forecast": {"cycles": [], "file_ids": {}},
         "noaa_forecast_recent": {"cycles": [], "file_ids": {}},
         "noaa_forecast_archive": {"cycles": [], "file_ids": {}},
@@ -220,56 +235,58 @@ def _build_hrrr_forecast(client: DriveClient) -> dict[str, Any]:
     return out
 
 
+def _hist15_day_key(name: str) -> str | None:
+    """YYYY-MM-DD from a 15-min daily name (new pattern, legacy CONUS_ fallback)."""
+    m = _RE_HRRR_HIST15_DAY.match(name) or _RE_HRRR_HISTORY_DAY.match(name)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    return None
+
+
+def _hist15_month_key(name: str) -> str | None:
+    """YYYY-MM from a 15-min monthly name (new pattern, legacy CONUS_ fallback)."""
+    m = _RE_HRRR_HIST15_MONTH.match(name) or _RE_HRRR_HISTORY_MONTH.match(name)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}"
+    return None
+
+
+def _pack_days(d: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    keys = sorted(d.keys(), reverse=True)
+    return {"days": keys, "file_ids": {k: d[k] for k in keys}}
+
+
+def _pack_months(d: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    keys = sorted(d.keys(), reverse=True)
+    return {"months": keys, "file_ids": {k: d[k] for k in keys}}
+
+
 def _build_hrrr_history(client: DriveClient) -> dict[str, dict[str, Any]]:
+    """15-min HRRR history: current-year daily zips + past-year monthly zips."""
     main_folder = _folder_id("GDRIVE_HRRR_HISTORY_FOLDER_ID", "hrrr_history_main")
     archive_folder = _folder_id(
         "GDRIVE_HRRR_HISTORY_ARCHIVE_FOLDER_ID", "hrrr_history_archive"
     )
 
-    def _scan_daily(folder: str) -> dict[str, dict[str, Any]]:
-        """Returns individual day entries keyed by YYYY-MM-DD (or YYYY-MM for monthly files)."""
-        days: dict[str, dict[str, Any]] = {}
-        for f in client.list_files(folder):
-            name = f.get("name") or ""
-            d = _RE_HRRR_HISTORY_DAY.match(name)
-            if d:
-                key = f"{d.group(1)}-{d.group(2)}-{d.group(3)}"
-                days.setdefault(key, _entry(f))
-                continue
-            m = _RE_HRRR_HISTORY_MONTH.match(name)
-            if m:
-                key = f"{m.group(1)}-{m.group(2)}"
-                days.setdefault(key, _entry(f))
-        return days
+    current_days: dict[str, dict[str, Any]] = {}
+    for f in client.list_files(main_folder):
+        key = _hist15_day_key(f.get("name") or "")
+        if key:
+            current_days.setdefault(key, _entry(f))
 
-    def _scan_monthly(folder: str) -> dict[str, dict[str, Any]]:
-        """Groups files by month; daily files roll into their month bucket."""
-        monthly: dict[str, dict[str, Any]] = {}
-        for f in client.list_files(folder):
-            name = f.get("name") or ""
-            m = _RE_HRRR_HISTORY_MONTH.match(name)
-            if m:
-                key = f"{m.group(1)}-{m.group(2)}"
-                monthly.setdefault(key, _entry(f))
-                continue
-            d = _RE_HRRR_HISTORY_DAY.match(name)
-            if d:
-                key = f"{d.group(1)}-{d.group(2)}"
-                monthly.setdefault(key, _entry(f))
-        return monthly
+    archive_months: dict[str, dict[str, Any]] = {}
+    for f in client.list_files(archive_folder):
+        name = f.get("name") or ""
+        key = _hist15_month_key(name)
+        if key:
+            archive_months.setdefault(key, _entry(f))
+            continue
+        # A stray daily file in the archive folder rolls into its month bucket.
+        dkey = _hist15_day_key(name)
+        if dkey:
+            archive_months.setdefault(dkey[:7], _entry(f))
 
-    def _pack_days(d: dict[str, dict[str, Any]]) -> dict[str, Any]:
-        keys = sorted(d.keys(), reverse=True)
-        return {"days": keys, "file_ids": {k: d[k] for k in keys}}
-
-    def _pack_months(d: dict[str, dict[str, Any]]) -> dict[str, Any]:
-        keys = sorted(d.keys(), reverse=True)
-        return {"months": keys, "file_ids": {k: d[k] for k in keys}}
-
-    current_days = _scan_daily(main_folder)
-    archive_months = _scan_monthly(archive_folder)
-
-    # Combined view: roll current daily into months, merge with archive
+    # Combined view: roll current daily into months, merge with archive.
     current_as_months: dict[str, dict[str, Any]] = {}
     for day_key, entry in current_days.items():
         current_as_months.setdefault(day_key[:7], entry)
@@ -279,6 +296,38 @@ def _build_hrrr_history(client: DriveClient) -> dict[str, dict[str, Any]]:
         "hrrr_history": _pack_months(combined),
         "hrrr_history_current": _pack_days(current_days),
         "hrrr_history_archive": _pack_months(archive_months),
+    }
+
+
+def _build_hrrr_history_hourly(client: DriveClient) -> dict[str, dict[str, Any]]:
+    """Hourly HRRR history: current-year daily bare .pww + past-year monthly zips."""
+    main_folder = _folder_id(
+        "GDRIVE_HRRR_HISTORY_HOURLY_FOLDER_ID", "hrrr_history_hourly_main"
+    )
+    archive_folder = _folder_id(
+        "GDRIVE_HRRR_HISTORY_HOURLY_ARCHIVE_FOLDER_ID", "hrrr_history_hourly_archive"
+    )
+
+    days: dict[str, dict[str, Any]] = {}
+    for f in client.list_files(main_folder):
+        m = _RE_HRRR_HOURLY_DAY.match(f.get("name") or "")
+        if m:
+            days.setdefault(f"{m.group(1)}-{m.group(2)}-{m.group(3)}", _entry(f))
+
+    months: dict[str, dict[str, Any]] = {}
+    for f in client.list_files(archive_folder):
+        name = f.get("name") or ""
+        m = _RE_HRRR_HOURLY_MONTH.match(name)
+        if m:
+            months.setdefault(f"{m.group(1)}-{m.group(2)}", _entry(f))
+            continue
+        md = _RE_HRRR_HOURLY_DAY.match(name)
+        if md:
+            months.setdefault(f"{md.group(1)}-{md.group(2)}", _entry(f))
+
+    return {
+        "hrrr_history_hourly_current": _pack_days(days),
+        "hrrr_history_hourly_archive": _pack_months(months),
     }
 
 
@@ -364,6 +413,13 @@ def build_catalog() -> dict[str, Any]:
         catalog["hrrr_history_archive"] = hrrr["hrrr_history_archive"]
     except Exception as exc:  # pragma: no cover - defensive
         print(f"[catalog] hrrr_history failed: {exc}", file=sys.stderr)
+
+    try:
+        hourly = _build_hrrr_history_hourly(client)
+        catalog["hrrr_history_hourly_current"] = hourly["hrrr_history_hourly_current"]
+        catalog["hrrr_history_hourly_archive"] = hourly["hrrr_history_hourly_archive"]
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"[catalog] hrrr_history_hourly failed: {exc}", file=sys.stderr)
 
     try:
         noaa = _build_noaa(client)
