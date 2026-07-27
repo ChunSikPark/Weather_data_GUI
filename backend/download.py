@@ -354,9 +354,7 @@ def fetch_and_crop(
             header, stations, arr = pww_io.crop_to_bbox(header, stations, arr, bbox)
 
         if t_start is not None or t_end is not None:
-            ts = t_start if t_start is not None else header["date_min"]
-            te = t_end if t_end is not None else header["date_max"]
-            header, arr = pww_io.crop_to_timerange(header, arr, ts, te)
+            header, arr = pww_io.crop_to_timerange(header, arr, t_start, t_end)
 
         return pww_io.write_pww(header, stations, arr)
     except HTTPException:

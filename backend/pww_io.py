@@ -270,11 +270,13 @@ def _unix_to_ole(unix_sec: float) -> float:
     return unix_sec / 86400 + _OLE_EPOCH_OFFSET
 
 
-def crop_to_timerange(header: dict, arr: np.ndarray, t_start: float, t_end: float) -> tuple[dict, np.ndarray]:
+def crop_to_timerange(header: dict, arr: np.ndarray, t_start: float | None, t_end: float | None) -> tuple[dict, np.ndarray]:
     """Crop the time axis of a PWW array to [t_start, t_end] (Unix epoch seconds).
 
     PWW stores date_min/date_max as OLE Automation days (days since Dec 30 1899).
-    t_start/t_end are converted to OLE days before indexing.
+    t_start/t_end are converted to OLE days before indexing.  Either bound may be
+    None to leave that side open — passing header["date_min"]/["date_max"] instead
+    would feed OLE days into a parameter expecting epoch seconds.
     Returns (new_header, cropped_arr).  Raises ValueError if no time steps fall
     within the range.
     """
@@ -284,8 +286,8 @@ def crop_to_timerange(header: dict, arr: np.ndarray, t_start: float, t_end: floa
     sample_days = sample_sec / 86400
     count = arr.shape[0]
 
-    ole_start = _unix_to_ole(t_start)
-    ole_end = _unix_to_ole(t_end)
+    ole_start = _unix_to_ole(t_start) if t_start is not None else date_min_ole
+    ole_end = _unix_to_ole(t_end) if t_end is not None else date_max_ole
 
     i_start = max(0, round((ole_start - date_min_ole) / sample_days))
     i_end = min(count, round((ole_end - date_min_ole) / sample_days) + 1)
