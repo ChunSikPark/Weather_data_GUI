@@ -120,6 +120,24 @@ north, west, south, east — and western longitudes are negative. See
 Also remember that multiple states crop to their **union rectangle**, not to the
 state outlines.
 
+## `AttributeError: 'WeatherClient' object has no attribute 'extreme'`
+
+You have a version older than 0.4.0. The error does not say so, and plain
+`pip install TeamOverbyeWeather` will **not** fix it — pip sees the requirement
+as already satisfied and leaves the old version in place. You need `--upgrade`:
+
+```bash
+pip install --upgrade TeamOverbyeWeather
+```
+
+```python
+import TeamOverbyeWeather
+print(TeamOverbyeWeather.__version__)     # 0.4.0 or newer
+```
+
+In a notebook, restart the kernel afterwards — an already-imported module is not
+replaced by installing over it.
+
 ## `ImportError: No module named numpy`
 
 Version 0.3.0 added numpy as a dependency. Upgrade:
