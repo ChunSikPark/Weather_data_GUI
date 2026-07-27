@@ -1,0 +1,38 @@
+name: Data request or question
+description: Ask about the data, request a dataset, or suggest a feature
+labels: ["question"]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What is this about?
+      options:
+        - A question about the data
+        - Requesting data that is not available yet
+        - Suggesting a feature
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: detail
+    attributes:
+      label: Details
+      description: >
+        For data questions, say which source and dates you are looking at. For
+        requests, what you need and roughly what you would use it for.
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        Quick answers to common questions:
+
+        - **What data exists?** `client.list(source, type)`, or browse the
+          [portal](https://weather-data-gui.pages.dev).
+        - **How do I crop to a region or time window?** See the
+          [documentation](https://chunsikpark.github.io/Weather_data_GUI/).
+        - **A source shows no data.** It may genuinely be empty — check
+          `client.list(...)` and try `client.catalog(refresh=True)`, since the
+          catalog is cached for 30 minutes.

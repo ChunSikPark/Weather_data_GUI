@@ -1,6 +1,49 @@
 # Team Overbye Weather Data Portal
 
-A public website for browsing and downloading Texas A&M weather research data from Google Drive — by source, region, and date range. Includes a companion Python package (`TeamOverbyeWeather`) for programmatic access.
+Weather data for power system studies — ERA5 reanalysis, HRRR history and
+forecasts, NOAA/GFS forecasts, and 62 curated historical extreme-temperature
+events. Download whole files or crop them to a region and a time window in one
+call.
+
+| | |
+|---|---|
+| **Web portal** | https://weather-data-gui.pages.dev |
+| **Documentation** | https://chunsikpark.github.io/Weather_data_GUI/ |
+| **Python package** | https://pypi.org/project/TeamOverbyeWeather/ |
+
+```bash
+pip install TeamOverbyeWeather
+```
+
+```python
+from TeamOverbyeWeather import WeatherClient
+
+client = WeatherClient()
+client.download("hrrr", type="hourly_current", dates="2026-07-21",
+                region="TX", time_start="2026-07-21T06:00",
+                time_end="2026-07-21T18:00", dest="./data")
+```
+
+Cropping happens on the server, so only what you ask for crosses the network: a
+Texas six-hour NOAA slice is 240 KB instead of the 120 MB full file.
+
+## Found a problem? Have a question?
+
+**[Open an issue](https://github.com/ChunSikPark/Weather_data_GUI/issues/new/choose)**
+— bug reports and data questions both welcome. For bugs, please include your
+package version (`TeamOverbyeWeather.__version__`), the code you ran, and the
+full error.
+
+Two things worth checking first:
+
+- `AttributeError: 'WeatherClient' object has no attribute ...` usually means an
+  old version. Run `pip install --upgrade TeamOverbyeWeather` and **restart your
+  kernel** — Python does not replace an already-imported module.
+- A source showing no data may genuinely be empty. Check `client.list(source,
+  type)`, and try `client.catalog(refresh=True)` since the catalog is cached for
+  30 minutes.
+
+`demo.ipynb` in this repository is a runnable walkthrough of everything.
 
 ---
 
