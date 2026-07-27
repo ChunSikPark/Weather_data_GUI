@@ -1,258 +1,147 @@
-"""HRRR forecast and history data client."""
+"""HRRR forecast and history client — thin wrapper over :meth:`WeatherClient.download`."""
 
 from __future__ import annotations
 
-import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from .era5 import _spatial
 
 if TYPE_CHECKING:
     from ..client import WeatherClient
 
 
 class HRRRClient:
-    """Provides access to HRRR historical and forecast datasets.
+    """Access HRRR historical and forecast datasets via :attr:`WeatherClient.hrrr`.
 
-    Access via :attr:`WeatherClient.hrrr`.
+    HRRR history comes in four flavours; pass *type* to pick one:
+
+    ==================  ==============  ==================================
+    type                date keys       contents
+    ==================  ==============  ==================================
+    ``current``         ``YYYY-MM-DD``  this year, 15-minute steps
+    ``archive``         ``YYYY-MM``     past years, 15-minute steps
+    ``hourly_current``  ``YYYY-MM-DD``  this year, hourly steps
+    ``hourly_archive``  ``YYYY-MM``     past years, hourly steps
+    ==================  ==============  ==================================
     """
 
     def __init__(self, client: "WeatherClient") -> None:
         self._client = client
 
     # ------------------------------------------------------------------
-    # Listing helpers
+    # Listing
     # ------------------------------------------------------------------
 
-    def list_months(self) -> list[str]:
-        """List available HRRR historical months.
+    def list_months(self, type: str = "archive") -> list[str]:
+        """List available ``YYYY-MM`` archive months, newest first.
 
-        Returns:
-            List of month strings like ``["2025-01", "2024-12"]``,
-            sorted newest first.
-
-        Raises:
-            requests.HTTPError: If the catalog request fails.
+        Args:
+            type: ``"archive"`` (15-min) or ``"hourly_archive"``.
         """
-        catalog = self._client.catalog()
-        source_data = catalog.get("hrrr_history", {})
-        if isinstance(source_data, list):
-            months = source_data
-        elif isinstance(source_data, dict):
-            months = source_data.get("months", [])
-        else:
-            months = []
-        return sorted(months, reverse=True)
+        return self._client.list("hrrr", type)
+
+    def list_days(self, type: str = "current") -> list[str]:
+        """List available ``YYYY-MM-DD`` days, newest first.
+
+        Args:
+            type: ``"current"`` (15-min) or ``"hourly_current"``.
+        """
+        return self._client.list("hrrr", type)
 
     def list_forecast_cycles(self) -> list[str]:
-        """List available HRRR forecast initialisation cycles.
-
-        Returns:
-            List of cycle strings like ``["2026-04-21T06Z", "2026-04-21T00Z"]``,
-            sorted newest first.
-
-        Raises:
-            requests.HTTPError: If the catalog request fails.
-        """
-        catalog = self._client.catalog()
-        source_data = catalog.get("hrrr_forecast", {})
-        if isinstance(source_data, list):
-            cycles = source_data
-        elif isinstance(source_data, dict):
-            cycles = source_data.get("cycles", [])
-        else:
-            cycles = []
-        return sorted(cycles, reverse=True)
+        """List available forecast cycles like ``["2026-07-22T12Z"]``, newest first."""
+        return self._client.list("hrrr", "forecast")
 
     # ------------------------------------------------------------------
-    # Download helpers
+    # Download
     # ------------------------------------------------------------------
 
     def download_history(
         self,
-        months: list[str],
+        months: list[str] | None = None,
         dest: str = ".",
+        *,
+        days: list[str] | None = None,
+        type: str | None = None,
+        **kwargs,
     ) -> list[Path]:
-        """Download HRRR historical monthly ZIP files.
+        """Download HRRR history files, one per date key.
 
         Args:
-            months: Month strings like ``["2025-01", "2024-12"]``.
-            dest: Destination directory (created if absent).
-
-        Returns:
-            List of :class:`pathlib.Path` objects for the saved files.
-
-        Raises:
-            requests.HTTPError: If any download request fails.
-        """
-        if not months:
-            return []
-
-        paths: list[Path] = []
-
-        if len(months) == 1:
-            m = months[0]
-            filename = f"HRRR_history_{m}.zip"
-            path = self._client._download(
-                "/api/download",
-                dest_dir=dest,
-                filename=filename,
-                source="hrrr_history",
-                dates=m,
-            )
-            paths.append(path)
-        else:
-            timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-            filename = f"TeamOverbye_hrrr_history_{timestamp}.zip"
-            path = self._client._download(
-                "/api/download",
-                dest_dir=dest,
-                filename=filename,
-                source="hrrr_history",
-                dates=",".join(months),
-            )
-            paths.append(path)
-
-        return paths
-
-    def download_forecast(
-        self,
-        cycles: list[str],
-        dest: str = ".",
-    ) -> list[Path]:
-        """Download HRRR forecast files (one ZIP per cycle).
-
-        Args:
-            cycles: Cycle strings like ``["2026-04-21T06Z"]``.
-            dest: Destination directory (created if absent).
-
-        Returns:
-            List of :class:`pathlib.Path` objects for the saved files.
+            months: ``YYYY-MM`` keys (archive).
+            dest: Destination directory.
+            days: ``YYYY-MM-DD`` keys (current year) — use instead of *months*.
+            type: Explicit sub-type; inferred from months/days when omitted.
+            **kwargs: Passed to :meth:`WeatherClient.download`.
 
         Raises:
-            requests.HTTPError: If any download request fails.
+            ValueError: If both or neither of *months* and *days* are given.
         """
-        if not cycles:
-            return []
+        dates, inferred = _history_dates(months, days)
+        return self._client.download("hrrr", dates, type or inferred,
+                                     dest=dest, **kwargs)
 
-        paths: list[Path] = []
-
-        if len(cycles) == 1:
-            c = cycles[0]
-            safe = c.replace(":", "").replace(" ", "_")
-            filename = f"HRRR_forecast_{safe}.zip"
-            path = self._client._download(
-                "/api/download",
-                dest_dir=dest,
-                filename=filename,
-                source="hrrr_forecast",
-                dates=c,
-            )
-            paths.append(path)
-        else:
-            timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-            filename = f"TeamOverbye_hrrr_forecast_{timestamp}.zip"
-            path = self._client._download(
-                "/api/download",
-                dest_dir=dest,
-                filename=filename,
-                source="hrrr_forecast",
-                dates=",".join(cycles),
-            )
-            paths.append(path)
-
-        return paths
+    def download_forecast(self, cycles: list[str], dest: str = ".", **kwargs) -> list[Path]:
+        """Download HRRR forecast files, one ZIP per cycle."""
+        return self._client.download("hrrr", cycles, "forecast", dest=dest, **kwargs)
 
     def download_region(
         self,
         *,
-        months: "list[str] | None" = None,
-        cycles: "list[str] | None" = None,
-        region_ids: "list[str] | None" = None,
-        region_layer: "str | None" = None,
-        bbox: "tuple | None" = None,
+        months: list[str] | None = None,
+        days: list[str] | None = None,
+        cycles: list[str] | None = None,
+        type: str | None = None,
+        region_ids: list[str] | None = None,
+        region_layer: str | None = None,
+        bbox: tuple | None = None,
         dest: str = ".",
-    ) -> "list[Path]":
-        """Download HRRR data cropped to a region (states/iso) or bbox.
+        **kwargs,
+    ) -> list[Path]:
+        """Download HRRR data cropped to a region or bbox.
 
-        Exactly one of months/cycles must be provided; exactly one of region_ids/bbox.
-        Large HRRR-archive + bbox requests are cropped locally (SDK-side) to avoid 413.
-        """
-        from ..utils import validate_region_args
-        validate_region_args(region_ids, region_layer, bbox)
-        if months is not None and cycles is not None:
-            raise ValueError("Provide exactly one of months or cycles, not both")
-        if months is None and cycles is None:
-            raise ValueError("Provide months (history) or cycles (forecast)")
-
-        is_history = months is not None
-        source = "hrrr_history" if is_history else "hrrr_forecast"
-        date_list = months if is_history else cycles
-
-        if not date_list:
-            return []
-
-        # Large bbox + HRRR history: SDK local crop
-        if is_history and bbox is not None:
-            lat_max, lon_min, lat_min, lon_max = bbox
-            area = (lat_max - lat_min) * (lon_max - lon_min)
-            if area >= 2380:
-                return self._local_crop(months, bbox, dest)
-
-        dates_param = ",".join(date_list)
-        if bbox is not None:
-            bbox_str = ",".join(str(x) for x in bbox)
-            filename = f"{source}_region_bundle.zip" if len(date_list) > 1 else f"{source}_{date_list[0]}_region.pww"
-            return [self._client._download("/api/download/region", dest_dir=dest,
-                                           filename=filename, source=source,
-                                           dates=dates_param, bbox=bbox_str)]
-        else:
-            ids_str = ",".join(region_ids)
-            filename = f"{source}_region_bundle.zip" if len(date_list) > 1 else f"{source}_{date_list[0]}_region.pww"
-            return [self._client._download("/api/download/region", dest_dir=dest,
-                                           filename=filename, source=source,
-                                           dates=dates_param,
-                                           region_layer=region_layer,
-                                           region_ids=ids_str)]
-
-    def _local_crop(self, months: "list[str]", bbox: tuple, dest: str) -> "list[Path]":
-        """Fallback: download full HRRR monthly archives and crop locally."""
-        import io as _io
-        import zipfile
-        from .. import pww_io
-        out = []
-        for m in months:
-            paths = self.download_history([m], dest=dest)
-            for p in paths:
-                raw = p.read_bytes()
-                if p.suffix.lower() == ".zip":
-                    with zipfile.ZipFile(_io.BytesIO(raw)) as zf:
-                        pww_names = [n for n in zf.namelist() if n.lower().endswith(".pww")]
-                        if not pww_names:
-                            continue
-                        raw = zf.read(pww_names[0])
-                h, s, a = pww_io.read_pww(raw)
-                h, s, a = pww_io.crop_to_bbox(h, s, a, bbox)
-                cropped_path = p.with_name(p.stem + "_region.pww")
-                cropped_path.write_bytes(pww_io.write_pww(h, s, a))
-                out.append(cropped_path)
-        return out
-
-    def download_latest_forecast(self, dest: str = ".") -> Path:
-        """Download the most recent HRRR forecast cycle.
+        CONUS-scale archive requests are cropped locally, since the server
+        refuses them to protect its memory budget.
 
         Args:
-            dest: Destination directory (created if absent).
+            months: ``YYYY-MM`` archive keys.
+            days: ``YYYY-MM-DD`` current-year keys.
+            cycles: Forecast cycle keys.
+            type: Explicit sub-type; inferred from the date argument when omitted.
+            region_ids: State postal codes or ISO zone ids.
+            region_layer: ``"states"`` or ``"iso"``.
+            bbox: ``(lat_max, lon_min, lat_min, lon_max)``.
+            dest: Destination directory.
+            **kwargs: Passed to :meth:`WeatherClient.download` (``time_start``, ...).
 
-        Returns:
-            :class:`pathlib.Path` to the saved file.
+        Raises:
+            ValueError: If not exactly one of months/days/cycles is given.
+        """
+        spatial = _spatial(region_ids, region_layer, bbox)
+        if cycles is not None:
+            if months is not None or days is not None:
+                raise ValueError("Provide exactly one of months, days, or cycles")
+            return self._client.download("hrrr", cycles, type or "forecast",
+                                         dest=dest, **spatial, **kwargs)
+        dates, inferred = _history_dates(months, days)
+        return self._client.download("hrrr", dates, type or inferred,
+                                     dest=dest, **spatial, **kwargs)
+
+    def download_latest_forecast(self, dest: str = ".", **kwargs) -> Path:
+        """Download the most recent HRRR forecast cycle.
 
         Raises:
             ValueError: If no forecast cycles are available.
-            requests.HTTPError: If the download request fails.
         """
         cycles = self.list_forecast_cycles()
         if not cycles:
             raise ValueError("No HRRR forecast cycles are currently available.")
-        latest = cycles[0]
-        paths = self.download_forecast([latest], dest=dest)
-        return paths[0]
+        return self.download_forecast([cycles[0]], dest=dest, **kwargs)[0]
+
+
+def _history_dates(months, days) -> tuple[list[str], str]:
+    """Pick the date list and infer the matching history sub-type."""
+    if (months is None) == (days is None):
+        raise ValueError("Provide exactly one of months (YYYY-MM) or days (YYYY-MM-DD)")
+    return (list(months), "archive") if months is not None else (list(days), "current")

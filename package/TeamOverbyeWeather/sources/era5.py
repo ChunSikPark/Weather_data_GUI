@@ -1,8 +1,7 @@
-"""ERA5 reanalysis data client."""
+"""ERA5 reanalysis data client — thin wrapper over :meth:`WeatherClient.download`."""
 
 from __future__ import annotations
 
-import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -13,128 +12,77 @@ if TYPE_CHECKING:
 
 
 class ERA5Client:
-    """Provides access to ERA5 quarterly reanalysis datasets.
-
-    Access via :attr:`WeatherClient.era5`.
-    """
+    """Access ERA5 quarterly reanalysis datasets via :attr:`WeatherClient.era5`."""
 
     def __init__(self, client: "WeatherClient") -> None:
         self._client = client
 
     def list_quarters(self, region: str = "north_america") -> list[str]:
-        """List available ERA5 quarters for a region.
+        """List available quarters like ``["2026-Q3", "2026-Q2"]``, newest first.
 
         Args:
             region: ``"north_america"`` or ``"texas"``.
-
-        Returns:
-            List of quarter strings like ``["2025-Q1", "2024-Q4"]``,
-            sorted newest first.
-
-        Raises:
-            ValueError: If *region* is not recognised.
-            requests.HTTPError: If the catalog request fails.
         """
-        source_key = quarter_to_source_key(region)
-        catalog = self._client.catalog()
-        source_data = catalog.get(source_key, {})
-        # Catalog is expected to contain a list of available quarter strings
-        # under the source key, or a dict with an "available" list.
-        if isinstance(source_data, list):
-            quarters = source_data
-        elif isinstance(source_data, dict):
-            quarters = source_data.get("quarters", [])
-        else:
-            quarters = []
-        return sorted(quarters, reverse=True)
+        return self._client.list(quarter_to_source_key(region))
 
     def download(
         self,
         quarters: list[str],
         region: str = "north_america",
         dest: str = ".",
+        **kwargs,
     ) -> list[Path]:
-        """Download ERA5 quarterly files.
-
-        ERA5 files in Drive are bare ``.pww`` (Team Overbye binary format).
-        For a single quarter the API streams the ``.pww`` directly; for
-        multiple quarters the API streams a ZIP bundle containing the
-        ``.pww`` files inside. Both cases are handled transparently.
+        """Download ERA5 quarterly ``.pww`` files, one per quarter.
 
         Args:
-            quarters: Quarter strings like ``["2025-Q1", "2024-Q4"]``.
+            quarters: Quarter strings like ``["2026-Q1"]``.
             region: ``"north_america"`` or ``"texas"``.
-            dest: Destination directory (created if absent).
-
-        Returns:
-            List of :class:`pathlib.Path` objects for the saved files.
-
-        Raises:
-            ValueError: If *region* is invalid or any quarter string is
-                malformed.
-            requests.HTTPError: If any download request fails.
+            dest: Destination directory.
+            **kwargs: Passed to :meth:`WeatherClient.download` (``time_start``,
+                ``time_end``, ``show_progress``, ...).
         """
-        if not quarters:
-            return []
-
-        source_key = quarter_to_source_key(region)
-
-        # Validate all quarter strings up-front.
         for q in quarters:
             parse_quarter(q)
-
-        paths: list[Path] = []
-
-        if len(quarters) == 1:
-            q = quarters[0]
-            filename = f"ERA5_{source_key}_{q}.pww"
-            path = self._client._download(
-                "/api/download",
-                dest_dir=dest,
-                filename=filename,
-                source=source_key,
-                dates=q,
-            )
-            paths.append(path)
-        else:
-            timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-            filename = f"TeamOverbye_{source_key}_{timestamp}.zip"
-            path = self._client._download(
-                "/api/download",
-                dest_dir=dest,
-                filename=filename,
-                source=source_key,
-                dates=",".join(quarters),
-            )
-            paths.append(path)
-
-        return paths
+        return self._client.download(quarter_to_source_key(region), quarters,
+                                     dest=dest, **kwargs)
 
     def download_region(
         self,
-        quarters: "list[str]",
+        quarters: list[str],
         *,
-        region_ids: "list[str] | None" = None,
-        region_layer: "str | None" = None,
-        bbox: "tuple | None" = None,
+        region: str = "north_america",
+        region_ids: list[str] | None = None,
+        region_layer: str | None = None,
+        bbox: tuple | None = None,
         dest: str = ".",
-    ) -> "list[Path]":
-        """Download ERA5 quarterly data cropped to a region or bbox."""
-        from ..utils import validate_region_args
-        validate_region_args(region_ids, region_layer, bbox)
-        if not quarters:
-            return []
-        source = "era5_na"
-        dates_param = ",".join(quarters)
-        filename = "era5_region_bundle.zip" if len(quarters) > 1 else f"era5_{quarters[0]}_region.pww"
-        if bbox is not None:
-            bbox_str = ",".join(str(x) for x in bbox)
-            return [self._client._download("/api/download/region", dest_dir=dest,
-                                           filename=filename, source=source,
-                                           dates=dates_param, bbox=bbox_str)]
-        else:
-            return [self._client._download("/api/download/region", dest_dir=dest,
-                                           filename=filename, source=source,
-                                           dates=dates_param,
-                                           region_layer=region_layer,
-                                           region_ids=",".join(region_ids))]
+        **kwargs,
+    ) -> list[Path]:
+        """Download ERA5 quarters cropped to a region or bbox.
+
+        Args:
+            quarters: Quarter strings.
+            region: Which ERA5 dataset — ``"north_america"`` or ``"texas"``.
+            region_ids: State postal codes or ISO zone ids to crop to.
+            region_layer: ``"states"`` or ``"iso"`` (required with *region_ids*).
+            bbox: ``(lat_max, lon_min, lat_min, lon_max)``.
+            dest: Destination directory.
+            **kwargs: Passed to :meth:`WeatherClient.download`.
+        """
+        for q in quarters:
+            parse_quarter(q)
+        spatial = _spatial(region_ids, region_layer, bbox)
+        return self._client.download(quarter_to_source_key(region), quarters,
+                                     dest=dest, **spatial, **kwargs)
+
+
+def _spatial(region_ids, region_layer, bbox) -> dict:
+    """Translate the legacy region_ids/region_layer/bbox trio into download() kwargs."""
+    if bbox is not None:
+        if region_ids is not None:
+            raise ValueError("Provide exactly one of region_ids or bbox, not both")
+        return {"bbox": bbox}
+    if region_ids is None:
+        raise ValueError("Provide region_ids or bbox")
+    if region_layer not in ("states", "iso"):
+        raise ValueError("region_layer must be 'states' or 'iso' when region_ids is given")
+    return {"region": region_ids} if region_layer == "states" else {"iso": region_ids}

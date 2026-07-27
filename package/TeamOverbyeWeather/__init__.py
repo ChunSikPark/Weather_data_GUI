@@ -1,4 +1,10 @@
 from .client import WeatherClient
+from .errors import RegionTooLargeError, ServerBusyError, WeatherAPIError
 
-__all__ = ["WeatherClient"]
-__version__ = "0.1.0"
+__all__ = [
+    "WeatherClient",
+    "WeatherAPIError",
+    "RegionTooLargeError",
+    "ServerBusyError",
+]
+__version__ = "0.3.0"

@@ -1,12 +1,14 @@
-"""PWW VERSION 1/2 binary I/O — in-memory read, bbox crop, and write.
+"""PWW VERSION 1/2 binary I/O — read, bbox crop, and write.
 
-VERSION 1 (HRRR, NOAA): station block is grid metadata, not real lat/lon.
-  Stations are skipped on read; output writes loc=0.
-VERSION 2 (ERA5): station block has real lat/lon; filtered by crop bbox.
+Ported from extract_region_pww.py.  Two entry points:
+  read_pww(data: bytes)  — in-memory (SDK / tests)
+  read_pww_file(path: str) — mmap-backed; file never fully loaded into RAM
 """
 from __future__ import annotations
 
 import io
+import mmap
+import os
 import struct
 
 import numpy as np
@@ -23,6 +25,12 @@ def _read_cstring(f) -> str:
 
 
 def _parse_header_only(f) -> tuple[dict, int, int]:
+    """Parse fixed header fields from a file-like object.
+
+    Returns (header, count, varcount).  Does NOT read the station block.
+    The caller is responsible for locating the array (either via f.tell()
+    after reading stations, or by computing from the end of the file).
+    """
     key1 = struct.unpack("<h", f.read(2))[0]
     key2 = struct.unpack("<h", f.read(2))[0]
     version = struct.unpack("<h", f.read(2))[0]
@@ -36,6 +44,7 @@ def _parse_header_only(f) -> tuple[dict, int, int]:
     count, sample_sec, loc = struct.unpack("<iii", f.read(12))
     loc_fc, varcount = struct.unpack("<hh", f.read(4))
     var_codes = list(struct.unpack(f"<{varcount}h", f.read(varcount * 2)))
+    # VERSION 2+ has a bytecount + valid_counts block; VERSION 1 goes straight to stations
     if version >= 2:
         _bytecount = struct.unpack("<h", f.read(2))[0]
         _valid_cnt = struct.unpack(f"<{_bytecount}i", f.read(_bytecount * 4))
@@ -67,21 +76,30 @@ def _read_stations(f, loc: int) -> list:
     return stations
 
 
+def _grid_shape(header: dict) -> tuple[int, int]:
+    n_lat = round((header["lat_max"] - header["lat_min"]) / 0.25) + 1
+    n_lon = round((header["lon_max"] - header["lon_min"]) / 0.25) + 1
+    return n_lat, n_lon
+
+
 def read_pww(data: bytes) -> tuple[dict, list, np.ndarray]:
     """Parse a PWW binary from bytes (VERSION 1 or 2).
 
-    VERSION 1 station block is skipped (grid metadata, not real lat/lon).
+    VERSION 1 files (HRRR, NOAA) have a station block whose records are grid
+    metadata, not real lat/lon stations.  We skip that block entirely and
+    return stations=[] to avoid corrupting outputs with garbage coordinates.
     """
     f = io.BytesIO(data)
     header, count, varcount = _parse_header_only(f)
-    n_lat = round((header["lat_max"] - header["lat_min"]) / 0.25) + 1
-    n_lon = round((header["lon_max"] - header["lon_min"]) / 0.25) + 1
+    n_lat, n_lon = _grid_shape(header)
     nbytes = count * varcount * n_lat * n_lon
 
     if header["version"] >= 2:
+        # VERSION 2: station records have valid lat/lon — parse them
         stations = _read_stations(f, header["loc"])
         arr_offset = f.tell()
     else:
+        # VERSION 1: station block is grid metadata, not real stations — skip it
         stations = []
         header["loc"] = 0
         arr_offset = len(data) - nbytes
@@ -91,10 +109,45 @@ def read_pww(data: bytes) -> tuple[dict, list, np.ndarray]:
     return header, stations, arr
 
 
+def read_pww_file(path: str) -> tuple[dict, list, np.ndarray]:
+    """Parse a PWW file using mmap — the file is never fully loaded into RAM.
+
+    VERSION 1 station block is skipped (see read_pww docstring).
+    """
+    file_size = os.path.getsize(path)
+    with open(path, "rb") as fh:
+        header, count, varcount = _parse_header_only(fh)
+        n_lat, n_lon = _grid_shape(header)
+        nbytes = count * varcount * n_lat * n_lon
+
+        if header["version"] >= 2:
+            stations = _read_stations(fh, header["loc"])
+            arr_offset = fh.tell()
+        else:
+            stations = []
+            header["loc"] = 0
+            arr_offset = file_size - nbytes
+
+        mm = mmap.mmap(fh.fileno(), length=0, access=mmap.ACCESS_READ)
+        try:
+            arr = np.frombuffer(mm, dtype=np.uint8, offset=arr_offset, count=nbytes) \
+                    .reshape(count, varcount, n_lat, n_lon).copy()
+        finally:
+            # Release mapped pages immediately so the kernel reclaims page cache.
+            # Prevents accumulation across sequential multi-file crops on Railway.
+            if hasattr(mmap, "MADV_DONTNEED"):
+                try:
+                    mm.madvise(mmap.MADV_DONTNEED)
+                except OSError:
+                    pass
+            mm.close()
+    return header, stations, arr
+
+
 def crop_to_bbox(header: dict, stations: list, arr: np.ndarray, region: tuple) -> tuple[dict, list, np.ndarray]:
     """Crop a full-grid PWW array to a bounding box.
 
-    region : (lat_max, lon_min, lat_min, lon_max) — CDS convention (N, W, S, E).
+    region : (lat_max, lon_min, lat_min, lon_max) tuple — CDS convention (N, W, S, E).
     """
     if not (isinstance(region, tuple) and len(region) == 4):
         raise ValueError("region must be a (lat_max, lon_min, lat_min, lon_max) tuple")
@@ -105,6 +158,7 @@ def crop_to_bbox(header: dict, stations: list, arr: np.ndarray, region: tuple) -
 
     lat_s = round((r_lat_min - src_lat_min) / 0.25)
     lat_e = round((r_lat_max - src_lat_min) / 0.25) + 1
+
     lon_s = round((src_lon_max - r_lon_max) / 0.25)
     lon_e = round((src_lon_max - r_lon_min) / 0.25) + 1
 
@@ -133,6 +187,34 @@ def crop_to_bbox(header: dict, stations: list, arr: np.ndarray, region: tuple) -
         loc=len(new_stations),
     )
     return new_header, new_stations, cropped
+
+
+def concat_time(pieces: list) -> tuple[dict, list, np.ndarray]:
+    """Concatenate several (header, stations, arr) PWW pieces along the time axis.
+
+    Used to reassemble the four 6-hour quarter PWWs inside a HRRR-history daily
+    zip into one full-day array.  Pieces must share grid shape, varcount,
+    var_codes and sample_sec, and be supplied in ascending time order.  The
+    returned header spans date_min..date_max of all pieces; ``write_pww``
+    recomputes VERSION 2 valid-counts from the concatenated array, so no
+    per-timestep bookkeeping is carried here.
+    """
+    if not pieces:
+        raise ValueError("no PWW pieces to concatenate")
+    if len(pieces) == 1:
+        return pieces[0]
+
+    headers = [p[0] for p in pieces]
+    arr = np.concatenate([p[2] for p in pieces], axis=0)
+
+    new_header = dict(headers[0])
+    new_header.update(
+        count=int(arr.shape[0]),
+        date_min=min(h["date_min"] for h in headers),
+        date_max=max(h["date_max"] for h in headers),
+    )
+    # Stations are identical across quarters — keep the first piece's list.
+    return new_header, pieces[0][1], arr
 
 
 def write_pww(header: dict, stations: list, arr: np.ndarray) -> bytes:
@@ -188,11 +270,13 @@ def _unix_to_ole(unix_sec: float) -> float:
     return unix_sec / 86400 + _OLE_EPOCH_OFFSET
 
 
-def crop_to_timerange(header: dict, arr: np.ndarray, t_start: float, t_end: float) -> tuple[dict, np.ndarray]:
+def crop_to_timerange(header: dict, arr: np.ndarray, t_start: float | None, t_end: float | None) -> tuple[dict, np.ndarray]:
     """Crop the time axis of a PWW array to [t_start, t_end] (Unix epoch seconds).
 
     PWW stores date_min/date_max as OLE Automation days (days since Dec 30 1899).
-    t_start/t_end are converted to OLE days before indexing.
+    t_start/t_end are converted to OLE days before indexing.  Either bound may be
+    None to leave that side open — passing header["date_min"]/["date_max"] instead
+    would feed OLE days into a parameter expecting epoch seconds.
     Returns (new_header, cropped_arr).  Raises ValueError if no time steps fall
     within the range.
     """
@@ -202,14 +286,14 @@ def crop_to_timerange(header: dict, arr: np.ndarray, t_start: float, t_end: floa
     sample_days = sample_sec / 86400
     count = arr.shape[0]
 
-    ole_start = _unix_to_ole(t_start)
-    ole_end = _unix_to_ole(t_end)
+    ole_start = _unix_to_ole(t_start) if t_start is not None else date_min_ole
+    ole_end = _unix_to_ole(t_end) if t_end is not None else date_max_ole
 
     i_start = max(0, round((ole_start - date_min_ole) / sample_days))
     i_end = min(count, round((ole_end - date_min_ole) / sample_days) + 1)
 
     if i_start >= i_end:
-        from datetime import datetime, timezone
+        from datetime import datetime, timezone, timedelta
         def _ole_to_iso(ole):
             unix = (ole - _OLE_EPOCH_OFFSET) * 86400
             return datetime.fromtimestamp(unix, tz=timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
