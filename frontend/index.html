@@ -73,14 +73,20 @@
           <div class="card-tag">Global</div>
           <div class="card-desc">GFS Forecast — 0.25°, North America</div>
         </div>
+        <div class="source-card" data-source="extreme" role="button" tabindex="0" aria-pressed="false">
+          <div class="card-icon">&#127777;</div>
+          <div class="card-name">Extreme Events</div>
+          <div class="card-tag">1899–2023</div>
+          <div class="card-desc">Historical heat waves &amp; cold snaps, with animations</div>
+        </div>
       </div>
     </section>
 
     <section id="step2" class="step-section hidden">
       <div class="step-header">
         <span class="step-index">02</span>
-        <span class="step-label">TYPE</span>
-        <span class="step-title">Select Data Type</span>
+        <span class="step-label" id="step2-label">TYPE</span>
+        <span class="step-title" id="step2-title">Select Data Type</span>
       </div>
       <div class="card-grid" id="type-grid">
         <!-- populated by JS -->
@@ -90,8 +96,8 @@
     <section id="step3" class="step-section hidden">
       <div class="step-header">
         <span class="step-index">03</span>
-        <span class="step-label">DATES</span>
-        <span class="step-title">Select Date Range</span>
+        <span class="step-label" id="step3-label">DATES</span>
+        <span class="step-title" id="step3-title">Select Date Range</span>
       </div>
       <div id="step3-controls">
         <!-- populated by JS -->

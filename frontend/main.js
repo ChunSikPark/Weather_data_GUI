@@ -41,6 +41,10 @@ const els = {
   downloadProgressText: $('download-progress-text'),
   btnDownload: $('btn-download'),
   btnDownloadLabel: $('btn-download-label'),
+  step2Label: $('step2-label'),
+  step2Title: $('step2-title'),
+  step3Label: $('step3-label'),
+  step3Title: $('step3-title'),
   downloadIcon: $('download-icon'),
   dotEra5: $('dot-era5'),
   dotHrrr: $('dot-hrrr'),
@@ -136,8 +140,17 @@ const TYPE_DEFS = {
 };
 
 // ── Source key mapping for API calls ────────────────────────────────────────
+// Extreme-event zones use the raw catalog name as the "type"; these are the
+// display labels.  Anything not listed falls back to the raw name.
+const ZONE_LABELS = {
+  NYISO_ISONE: 'NYISO / ISO-NE',
+  NorthAmerica: 'North America',
+};
+const zoneLabel = (z) => ZONE_LABELS[z] || z;
+
 function getApiSourceKey() {
   const { selectedSource, selectedType, selectedRegion } = state;
+  if (selectedSource === 'extreme') return 'extreme_events';
   if (selectedSource === 'era5') {
     return selectedRegion === 'tx' ? 'era5_tx' : 'era5_na';
   }
@@ -306,8 +319,46 @@ function selectSource(source) {
 }
 
 // ── Step 2 — Type selection ──────────────────────────────────────────────────
+// Extreme events pick an ISO zone at step 2 instead of a fixed sub-type, so the
+// cards are built from the catalog rather than TYPE_DEFS.
+function extremeZoneDefs() {
+  const section = (state.catalog && state.catalog.extreme_events) || {};
+  const byZone = section.events || {};
+  return (section.zones || []).map((zone) => {
+    const events = byZone[zone] || [];
+    const years = events.map((e) => e.date.slice(0, 4));
+    const span = years.length
+      ? (years[years.length - 1] === years[0] ? years[0]
+         : `${years[years.length - 1]}–${years[0]}`)
+      : '';
+    // "Hottest and coldest" only makes sense once there is more than one event.
+    const desc = events.length === 0 ? 'No events available'
+      : events.length === 1
+        ? (events[0].title.includes(span) ? events[0].title : `${events[0].title}, ${span}`)
+        : `Hottest and coldest on record, ${span}`;
+    return {
+      key: zone,
+      icon: '🗺️',
+      name: zoneLabel(zone),
+      tag: `${events.length} event${events.length === 1 ? '' : 's'}`,
+      desc,
+    };
+  });
+}
+
+// Extreme events pick a zone then browse a gallery, so steps 2 and 3 are not
+// "type" and "dates" for that source.
+function applyStepHeadings(source) {
+  const extreme = source === 'extreme';
+  els.step2Label.textContent = extreme ? 'ZONE' : 'TYPE';
+  els.step2Title.textContent = extreme ? 'Select ISO Zone' : 'Select Data Type';
+  els.step3Label.textContent = extreme ? 'EVENTS' : 'DATES';
+  els.step3Title.textContent = extreme ? 'Select Events' : 'Select Date Range';
+}
+
 function renderTypeCards(source) {
-  const types = TYPE_DEFS[source] || [];
+  applyStepHeadings(source);
+  const types = source === 'extreme' ? extremeZoneDefs() : (TYPE_DEFS[source] || []);
   els.typeGrid.innerHTML = '';
   types.forEach((def) => {
     const card = document.createElement('div');
@@ -386,6 +437,8 @@ function renderStep3() {
     renderCyclePicker('noaa_forecast_recent');
   } else if (selectedSource === 'noaa' && selectedType === 'archive') {
     renderCyclePicker('noaa_forecast_archive');
+  } else if (selectedSource === 'extreme') {
+    renderEventGallery(selectedType);
   }
 
   renderRegionPanelOnce();
@@ -829,6 +882,110 @@ function renderCyclePicker(catalogKey) {
   container.appendChild(list);
 }
 
+// ── Event Gallery (Extreme Events) ───────────────────────────────────────────
+function renderEventGallery(zone) {
+  const container = els.step3Controls;
+  const section = (state.catalog && state.catalog.extreme_events) || {};
+  const events = (section.events || {})[zone] || [];
+
+  if (events.length === 0) {
+    const msg = document.createElement('p');
+    msg.className = 'no-selection-msg';
+    msg.textContent = 'No events available for this zone.';
+    container.appendChild(msg);
+    return;
+  }
+
+  const header = document.createElement('div');
+  header.className = 'cycle-list-header';
+  header.textContent =
+    `${events.length} events in ${zoneLabel(zone)} — select one or more. `
+    + 'Press play to watch the event develop.';
+  container.appendChild(header);
+
+  const grid = document.createElement('div');
+  grid.className = 'event-grid';
+  grid.setAttribute('role', 'listbox');
+  grid.setAttribute('aria-multiselectable', 'true');
+  grid.setAttribute('aria-label', `Extreme events in ${zoneLabel(zone)}`);
+
+  events.forEach((ev) => {
+    const isSelected = state.selectedDates.has(ev.key);
+
+    const card = document.createElement('div');
+    card.className = 'event-card' + (isSelected ? ' selected' : '');
+    card.setAttribute('role', 'option');
+    card.setAttribute('aria-selected', String(isSelected));
+
+    if (ev.has_video) {
+      const video = document.createElement('video');
+      video.className = 'event-video';
+      // preload="none" matters: 62 events x ~27 MB would otherwise be fetched
+      // just by opening the page. Nothing is requested until play is pressed.
+      video.preload = 'none';
+      video.controls = true;
+      video.src = `${API_BASE}/api/extreme/video?key=${encodeURIComponent(ev.key)}`;
+      // Clicking the player must not toggle selection.
+      video.addEventListener('click', (e) => e.stopPropagation());
+      card.appendChild(video);
+    } else {
+      const ph = document.createElement('div');
+      ph.className = 'event-video event-video-missing';
+      ph.textContent = 'No animation';
+      card.appendChild(ph);
+    }
+
+    const body = document.createElement('div');
+    body.className = 'event-body';
+    body.setAttribute('role', 'button');
+    body.setAttribute('tabindex', '0');
+
+    const check = document.createElement('div');
+    check.className = 'cycle-checkbox';
+    check.setAttribute('aria-hidden', 'true');
+
+    const text = document.createElement('div');
+    text.className = 'event-text';
+    const title = document.createElement('div');
+    title.className = 'event-title';
+    title.textContent = ev.title;
+    const date = document.createElement('div');
+    date.className = 'event-date';
+    date.textContent = ev.date;
+    text.appendChild(title);
+    text.appendChild(date);
+
+    body.appendChild(check);
+    body.appendChild(text);
+    card.appendChild(body);
+
+    const toggle = () => {
+      if (state.selectedDates.has(ev.key)) {
+        state.selectedDates.delete(ev.key);
+        card.classList.remove('selected');
+        card.setAttribute('aria-selected', 'false');
+      } else {
+        state.selectedDates.add(ev.key);
+        card.classList.add('selected');
+        card.setAttribute('aria-selected', 'true');
+      }
+      updateDownloadBar();
+    };
+
+    body.addEventListener('click', toggle);
+    body.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    grid.appendChild(card);
+  });
+
+  container.appendChild(grid);
+}
+
 // ── Catalog list helper ──────────────────────────────────────────────────────
 function getCatalogList(sourceKey, listKey) {
   if (!state.catalog) return [];
@@ -868,12 +1025,22 @@ function updateDownloadBar() {
     else sourceLabel = 'HRRR Forecast';
   } else if (selectedSource === 'noaa') {
     sourceLabel = selectedType === 'archive' ? 'NOAA / GFS Archive' : 'NOAA / GFS Recent';
+  } else if (selectedSource === 'extreme') {
+    sourceLabel = `Extreme Events — ${zoneLabel(selectedType)}`;
   }
 
   // Sort and format selected dates
   const sortedDates = [...selectedDates].sort();
   let datesLabel = '';
-  if (selectedSource === 'era5') {
+  if (selectedSource === 'extreme') {
+    // Event keys are "YYYY-MM-DD_Title_Zone"; show the human title.
+    const byKey = {};
+    Object.values((state.catalog.extreme_events || {}).events || {})
+      .flat().forEach((e) => { byKey[e.key] = e; });
+    datesLabel = sortedDates
+      .map((k) => (byKey[k] ? `${byKey[k].title} (${byKey[k].date})` : k))
+      .join(', ');
+  } else if (selectedSource === 'era5') {
     datesLabel = sortedDates.join(', ');
   } else if (selectedSource === 'hrrr' && (selectedType === 'current' || selectedType === 'hourly_current')) {
     datesLabel = sortedDates.map((d) => {
