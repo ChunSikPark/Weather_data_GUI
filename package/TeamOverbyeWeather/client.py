@@ -9,7 +9,7 @@ import requests
 
 from . import localcrop, registry
 from .errors import RegionTooLargeError, WeatherAPIError
-from .utils import download_file, to_epoch, to_iso
+from .utils import download_file, server_detail, to_epoch, to_iso
 
 DEFAULT_BASE_URL = "https://weather-data-gui.up.railway.app"
 
@@ -93,8 +93,7 @@ class WeatherClient:
         """
         api_key = registry.resolve(source, type)
         section = self.catalog().get(api_key) or {}
-        keys = section.get(registry.list_key(api_key), []) if isinstance(section, dict) else section
-        return sorted(keys, reverse=True)
+        return sorted(section.get(registry.list_key(api_key), []), reverse=True)
 
     def regions(self) -> dict:
         """Return the region catalog: ``{"states": [...], "iso": [...]}``.
@@ -196,8 +195,8 @@ class WeatherClient:
                     raise
                 print(f"Server can't crop {api_key} {key} at this scale — "
                       f"downloading in full and cropping locally.")
-                out.append(self._local(api_key, key, ids, box, t_start, t_end,
-                                       dest, show, keep_raw))
+                out.append(self._local(api_key, key, layer, ids, box, t_start,
+                                       t_end, dest, show, keep_raw))
         return out
 
     # ------------------------------------------------------------------
@@ -236,8 +235,7 @@ class WeatherClient:
     def _json(self, path: str, **params) -> dict:
         resp = requests.get(self._base_url + path, params=params or None, timeout=120)
         if not resp.ok:
-            from .utils import _server_detail
-            detail, _ = _server_detail(resp)
+            detail, _ = server_detail(resp)
             raise WeatherAPIError(resp.status_code, detail)
         return resp.json()
 
@@ -259,10 +257,11 @@ class WeatherClient:
         })
         return download_file(url, dest_dir=dest, show_progress=show)
 
-    def _local(self, api_key, key, ids, box, t_start, t_end, dest, show, keep_raw) -> Path:
+    def _local(self, api_key, key, layer, ids, box, t_start, t_end, dest, show,
+               keep_raw) -> Path:
         """Download one file in full and crop it on this machine."""
         if box is None:
-            box = self._bbox_for_ids(ids)
+            box = self._bbox_for_ids(layer, ids)
 
         if keep_raw:
             raw = self._plain(api_key, key, dest, show)
@@ -285,16 +284,17 @@ class WeatherClient:
                 import shutil
                 shutil.rmtree(cleanup, ignore_errors=True)
 
-    def _bbox_for_ids(self, ids: list[str]) -> tuple:
-        """Resolve region ids to their union bbox using the server's catalog."""
-        payload = self.regions()
-        found: list[tuple] = []
-        for layer in ("states", "iso"):
-            for entry in payload.get(layer, []):
-                if entry["id"] in ids:
-                    found.append(tuple(entry["bbox"]))
-        if not found:
-            raise ValueError(f"No bbox found for region ids {ids}")
+    def _bbox_for_ids(self, layer: str, ids: list[str]) -> tuple:
+        """Resolve region ids to their union bbox using the server's catalog.
+
+        Only *layer* is searched — scanning both would silently widen the box if
+        an id ever existed in each.
+        """
+        entries = {e["id"]: tuple(e["bbox"]) for e in self.regions().get(layer, [])}
+        missing = [i for i in ids if i not in entries]
+        if missing:
+            raise ValueError(f"Unknown {layer} region ids: {missing}")
+        found = [entries[i] for i in ids]
         return (
             max(b[0] for b in found), min(b[1] for b in found),
             min(b[2] for b in found), max(b[3] for b in found),
@@ -302,11 +302,16 @@ class WeatherClient:
 
     @staticmethod
     def _time_tag(t_start: str | None, t_end: str | None) -> str:
-        """Match the server's filename time tag so local and remote agree."""
+        """Match the server's filename time tag so local and remote agree.
+
+        Minutes are included: without them two windows in the same hour collide
+        on one filename and the second download silently overwrites the first —
+        which is exactly the case that matters for 15-minute HRRR data.
+        """
         if not (t_start or t_end):
             return ""
         import datetime as dt
-        fmt = lambda s: dt.datetime.fromisoformat(s).strftime("%Y%m%dH%H") if s else ""
+        fmt = lambda s: dt.datetime.fromisoformat(s).strftime("%Y%m%dH%H%M") if s else ""
         s, e = fmt(t_start), fmt(t_end)
         return f"_T{s}to{e}" if s and e else f"_T{s or e}"
 

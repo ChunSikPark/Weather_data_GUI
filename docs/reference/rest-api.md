@@ -133,3 +133,19 @@ curl "https://weather-data-gui.up.railway.app/api/debug/folder?folder_id=<id>&li
 The first lists the resolved Drive folder ids; the second lists real filenames in
 one. Together they distinguish a permissions problem from a filename-pattern
 problem.
+
+:::{warning}
+The `files` array from `/api/debug/folder` ends with a **sentinel entry** that
+is not a file:
+
+```json
+{"folder_id": "1kAOe...", "files": [
+  {"name": "Forecast_NorthAmerica_Run2026-07-22T12Z.pww", "id": "1ACp..."},
+  {"_total_count": "2594"}
+]}
+```
+
+It carries the folder's true size, which is useful — but it has no `name` key,
+so code that does `entry["name"]` over the whole array raises `KeyError`. Filter
+on `"name" in entry`.
+:::

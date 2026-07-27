@@ -135,9 +135,13 @@ Time-cropped files carry the window in the filename, so a directory of downloads
 stays self-describing:
 
 ```text
-noaa_forecast_recent_2026-07-22T12Z_TX_T20260722H12to20260722H18.pww
-                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-                                       from 2026-07-22 12h to 18h
+noaa_forecast_recent_2026-07-22T12Z_TX_T20260722H1200to20260722H1800.pww
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                       from 2026-07-22 12:00 to 18:00
 ```
 
-One-sided windows get a single stamp: `_T20260722H12`.
+One-sided windows get a single stamp: `_T20260722H1200`.
+
+The stamp includes minutes, so two windows within the same hour produce
+different filenames rather than the second silently overwriting the first —
+which matters when slicing 15-minute HRRR data.

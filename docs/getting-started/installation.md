@@ -87,13 +87,6 @@ client = WeatherClient(base_url="http://localhost:8000")
 pip install --upgrade TeamOverbyeWeather
 ```
 
-To install the unreleased state of `main` instead:
-
-```bash
-pip install --upgrade --force-reinstall \
-  "git+https://github.com/ChunSikPark/Weather_data_GUI.git#subdirectory=package"
-```
-
 Version 0.3.0 added the unified {meth}`~TeamOverbyeWeather.WeatherClient.download`
 method, time cropping, and access to the hourly HRRR archives. The older
 per-source methods (`client.hrrr.download_history()` and friends) still work —

@@ -328,10 +328,12 @@ async def download_region(
         raise HTTPException(status_code=400, detail="time_end must be after time_start")
 
     def _time_tag() -> str:
+        # Minutes are included so two windows within the same hour don't collide
+        # on one filename (matters for 15-min HRRR). Mirrors WeatherClient._time_tag.
         if not (t_start_epoch or t_end_epoch):
             return ""
         from datetime import datetime, timezone
-        fmt = lambda ts: datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y%m%dH%H") if ts else ""
+        fmt = lambda ts: datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y%m%dH%H%M") if ts else ""
         s, e = fmt(t_start_epoch), fmt(t_end_epoch)
         if s and e:
             return f"_T{s}to{e}"

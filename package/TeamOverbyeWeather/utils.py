@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import datetime as _dt
-import json
+import os
 import re
 import time
 import urllib.parse
@@ -17,7 +17,7 @@ from .errors import RegionTooLargeError, ServerBusyError, WeatherAPIError
 _CHUNK = 1 << 20  # 1 MiB
 
 
-def _server_detail(resp: requests.Response) -> tuple[str, str]:
+def server_detail(resp: requests.Response) -> tuple[str, str]:
     """Extract ``(detail, sdk_hint)`` from a FastAPI error body."""
     try:
         body = resp.json()
@@ -30,10 +30,44 @@ def _server_detail(resp: requests.Response) -> tuple[str, str]:
 
 
 def _filename_from_headers(resp: requests.Response) -> str | None:
-    """Read the filename the server suggested via Content-Disposition."""
+    """Read the filename the server suggested via Content-Disposition.
+
+    The value is reduced to a bare filename: it is attacker-controlled whenever
+    the client talks to an untrusted or redirected host, and both ``..`` and an
+    absolute path would otherwise escape the destination directory (``Path(d) /
+    "/etc/x"`` discards ``d`` entirely).  Percent-encoding is decoded *before*
+    stripping, so ``%2e%2e%2f`` cannot smuggle a separator through.
+    """
     cd = resp.headers.get("content-disposition", "")
     m = re.search(r"filename\*=UTF-8''([^;]+)", cd) or re.search(r'filename="?([^";]+)"?', cd)
-    return urllib.parse.unquote(m.group(1)).strip() if m else None
+    if not m:
+        return None
+    name = urllib.parse.unquote(m.group(1)).strip()
+    name = os.path.basename(name.replace("\\", "/").split(":")[-1]).strip()
+    return name or None
+
+
+def safe_target(dest_dir: Path | str, name: str) -> Path:
+    """Resolve *name* inside *dest_dir*, refusing anything that escapes it.
+
+    Args:
+        dest_dir: Directory the file must land in.
+        name: Candidate filename (already reduced to a basename).
+
+    Returns:
+        The absolute path to write to.
+
+    Raises:
+        ValueError: If the resolved path falls outside *dest_dir*.
+    """
+    base = Path(dest_dir).resolve()
+    target = (base / name).resolve()
+    if target == base or base not in target.parents:
+        raise ValueError(
+            f"Refusing to write {name!r}: resolves outside the destination "
+            f"directory {str(base)!r}."
+        )
+    return target
 
 
 def download_file(
@@ -81,7 +115,7 @@ def download_file(
                 continue
 
             if not resp.ok:
-                detail, hint = _server_detail(resp)
+                detail, hint = server_detail(resp)
                 if resp.status_code == 413:
                     raise RegionTooLargeError(detail, hint)
                 if resp.status_code == 503:
@@ -90,10 +124,12 @@ def download_file(
 
             if dest_path is not None:
                 target = Path(dest_path)
+                target.parent.mkdir(parents=True, exist_ok=True)
             else:
+                # The name comes from the server, so confine it to dest_dir.
+                Path(dest_dir).mkdir(parents=True, exist_ok=True)
                 name = _filename_from_headers(resp) or "download.bin"
-                target = Path(dest_dir) / name
-            target.parent.mkdir(parents=True, exist_ok=True)
+                target = safe_target(dest_dir, name)
 
             total = int(resp.headers.get("content-length", 0)) or None
             with open(target, "wb") as fh:
@@ -109,8 +145,6 @@ def download_file(
                         if chunk:
                             fh.write(chunk)
             return target
-
-    raise ServerBusyError(f"Download queue still full after {max_retries} retries")
 
 
 def to_iso(value) -> str:

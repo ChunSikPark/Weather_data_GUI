@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.abspath("../package"))
 project = "Team Overbye Weather Data"
 copyright = "Texas A&M University, Team Overbye"
 author = "Team Overbye"
-release = "0.3.0"
+release = "0.3.1"
 
 extensions = [
     "myst_parser",

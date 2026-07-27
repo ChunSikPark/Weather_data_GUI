@@ -46,7 +46,7 @@ what was done to them:
 ```text
 Forecast_NorthAmerica_Run2026-07-22T12Z.pww               uncropped
 noaa_forecast_recent_2026-07-22T12Z_TX.pww                region crop
-noaa_forecast_recent_..._TX_T20260722H12to20260722H18.pww region + time crop
+noaa_forecast_recent_..._TX_T20260722H1200to20260722H1800.pww  region + time
 noaa_forecast_recent_2026-07-22T12Z_TX+OK+NM.pww          multi-state union
 noaa_forecast_recent_2026-07-22T12Z_ERCOT.pww             ISO zone
 noaa_forecast_recent_2026-07-22T12Z_custom.pww            custom bbox

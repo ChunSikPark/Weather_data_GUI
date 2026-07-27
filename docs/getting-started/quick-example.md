@@ -86,7 +86,7 @@ path = client.download(
 ```
 
 ```text
-data/noaa_forecast_recent_2026-07-22T12Z_TX_T20260722H12to20260722H18.pww
+data/noaa_forecast_recent_2026-07-22T12Z_TX_T20260722H1200to20260722H1800.pww
 ```
 
 The filename records both crops. What actually changed:
