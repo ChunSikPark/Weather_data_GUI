@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "TeamOverbyeWeather"
-version = "0.4.1"
+version = "0.4.2"
 description = "Python client for Team Overbye weather data (Texas A&M)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -24,7 +24,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/ChunSikPark/TeamOverbyeWeather"
-Documentation = "https://chunsikpark.github.io/Weather_data_GUI/"
+Documentation = "https://chunsikpark.github.io/TeamOverbyeWeather/"
 Repository = "https://github.com/ChunSikPark/TeamOverbyeWeather"
 "Web Portal" = "https://weather-data-gui.pages.dev"
 "Bug Tracker" = "https://github.com/ChunSikPark/TeamOverbyeWeather/issues"
