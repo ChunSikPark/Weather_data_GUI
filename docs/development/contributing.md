@@ -115,8 +115,18 @@ four quarter files were not stitched.
 
 ```bash
 cd package
+rm -rf dist build
 python -m build
+python -m twine check dist/*
 python -m twine upload dist/*
+```
+
+A version number on PyPI can never be reused, so run `twine check` first and
+confirm the metadata (especially `[project.urls]`) is right before uploading.
+Verify afterwards in a clean environment:
+
+```bash
+python -m venv /tmp/check && /tmp/check/bin/pip install TeamOverbyeWeather
 ```
 
 **Backend and frontend** — push to `main`; both auto-deploy. Refresh the catalog

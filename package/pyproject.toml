@@ -23,4 +23,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/teamoverbye/weather-data"
+Homepage = "https://github.com/ChunSikPark/Weather_data_GUI"
+Documentation = "https://teamoverbye-weather.readthedocs.io"
+Repository = "https://github.com/ChunSikPark/Weather_data_GUI"
+"Web Portal" = "https://weather-data-gui.pages.dev"
+"Bug Tracker" = "https://github.com/ChunSikPark/Weather_data_GUI/issues"

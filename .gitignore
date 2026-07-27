@@ -38,3 +38,7 @@ Thumbs.db
 
 # Downloaded data files
 data/
+
+# Credential files - never commit
+*.pypirc
+.pypirc

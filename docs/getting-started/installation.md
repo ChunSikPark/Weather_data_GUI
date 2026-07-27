@@ -63,7 +63,7 @@ print(client.list("noaa")[:5])
 
 If that returns a non-empty list, you are ready to go.
 
-## Install from source
+## Install for development
 
 If you are working on the package itself:
 
@@ -85,6 +85,13 @@ client = WeatherClient(base_url="http://localhost:8000")
 
 ```bash
 pip install --upgrade TeamOverbyeWeather
+```
+
+To install the unreleased state of `main` instead:
+
+```bash
+pip install --upgrade --force-reinstall \
+  "git+https://github.com/ChunSikPark/Weather_data_GUI.git#subdirectory=package"
 ```
 
 Version 0.3.0 added the unified {meth}`~TeamOverbyeWeather.WeatherClient.download`
