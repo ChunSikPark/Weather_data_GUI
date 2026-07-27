@@ -51,3 +51,6 @@ package-repo/
 
 # Sphinx build output (docs live in the package repo now)
 docs/
+
+# VS Code Local History — snapshots every edited file, including credentials
+.history/
