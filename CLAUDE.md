@@ -38,7 +38,9 @@ package/TeamOverbyeWeather/  Python SDK (pip install TeamOverbyeWeather)
   ├ pww_io.py        Copy of backend/pww_io.py for local crop
   └ sources/         hrrr.py, noaa.py, era5.py — thin back-compat wrappers
 
-docs/               Sphinx docs → Read the Docs (.readthedocs.yaml at repo root)
+docs/               Sphinx docs → GitHub Pages via .github/workflows/docs.yml
+                    Live at https://chunsikpark.github.io/Weather_data_GUI/
+                    (.readthedocs.yaml is also present as an alternative host)
 ```
 
 ## SDK: one call does everything

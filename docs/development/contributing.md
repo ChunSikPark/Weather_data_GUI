@@ -34,8 +34,12 @@ the app still starts.
 sphinx-build -b html docs docs/_build/html
 ```
 
-Open `docs/_build/html/index.html`. Read the Docs builds the same tree from
-`.readthedocs.yaml`.
+Open `docs/_build/html/index.html`.
+
+Pushing to `main` rebuilds and publishes the site to
+<https://chunsikpark.github.io/Weather_data_GUI/> via
+`.github/workflows/docs.yml`. A `.readthedocs.yaml` is also checked in if you
+would rather host on Read the Docs, which adds versioned docs and PDF output.
 
 ## Adding a data source
 

@@ -42,3 +42,6 @@ data/
 # Credential files - never commit
 *.pypirc
 .pypirc
+
+# Demo notebook output
+demo_data/
