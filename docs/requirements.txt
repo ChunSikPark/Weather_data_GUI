@@ -1,0 +1,10 @@
+sphinx>=7.2
+sphinx-rtd-theme>=2.0
+myst-parser>=2.0
+sphinx-copybutton>=0.5
+linkify-it-py>=2.0
+
+# Imported by the package at autodoc time.
+requests>=2.31
+tqdm>=4.66
+numpy>=1.24

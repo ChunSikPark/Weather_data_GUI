@@ -31,9 +31,27 @@ backend/ (Railway, Docker)
   └ status.py        Pipeline health
 
 package/TeamOverbyeWeather/  Python SDK (pip install TeamOverbyeWeather)
+  ├ client.py        WeatherClient.download() — unified download+region+time crop
+  ├ registry.py      (source, type) → API key map; mirrors _SOURCE_LOOKUP + TYPE_DEFS
+  ├ localcrop.py     client-side crop fallback for 413s (handles nested zips)
+  ├ errors.py        WeatherAPIError / RegionTooLargeError / ServerBusyError
   ├ pww_io.py        Copy of backend/pww_io.py for local crop
-  └ sources/         hrrr.py, noaa.py, era5.py — each has download_region()
+  └ sources/         hrrr.py, noaa.py, era5.py — thin back-compat wrappers
+
+docs/               Sphinx docs → Read the Docs (.readthedocs.yaml at repo root)
 ```
+
+## SDK: one call does everything
+
+`client.download(source, dates, type=..., region=/iso=/bbox=, time_start=, time_end=, dest=)`
+returns **one file per date key** (never a ZIP). Region + time crop both happen
+server-side. `client.list(source, type)` gives valid date keys; `client.sources()` /
+`client.types(s)` / `client.region_ids(layer)` are the discovery surface.
+
+**Three files must stay in sync** when adding a source: `_SOURCE_LOOKUP` in
+`backend/download.py`, `_API_KEYS`/`_TYPES` in `package/.../registry.py`, and
+`TYPE_DEFS`/`getApiSourceKey()` in `frontend/main.js`. If a source works in the
+portal but not the SDK, that mismatch is the cause.
 
 ## Critical: Google Drive folder IDs
 
@@ -170,7 +188,16 @@ Returns 400 if both/neither of `region_ids`/`bbox` are given. Returns 413 with `
 
 11. **`_fetch_drive_to_tmp` must clean up its temp file on any error** — a Drive error mid-download otherwise orphans a multi-GB `/tmp` file with no reaper. Wrap the body in `try: ... except BaseException: os.unlink(path); raise`.
 
-12. **Frontend uses one unified download flow** — every request goes through `_fetchWithProgress` against `buildDownloadURL()`. While waiting for the first byte, the frontend rotates through phase-specific status messages every 20s ("Downloading from Drive…", "Cropping to region…", "Building the ZIP archive…") so the user knows what stage the server is at; once bytes start flowing, it switches to "Downloading — X MB / Y MB (Z%)". Don't reintroduce per-case branching with divergent messages.
+12. **PWW times are OLE Automation days in the file, Unix epoch seconds in the API.**
+    `header["date_min"]/["date_max"]` are OLE days (days since 1899-12-30, ~46000);
+    `crop_to_timerange(header, arr, t_start, t_end)` takes **epoch seconds**. Both are
+    floats, so mixing them fails silently-ish: passing `header["date_max"]` as a default
+    `t_end` yields an OLE date of 1970-01-01 and a bogus "No time steps in requested
+    range" 400. This was a live bug — `time_start` alone always 400'd. Fixed by letting
+    `crop_to_timerange` accept `None` for either bound instead of substituting header
+    values. **Never default a time bound to a header date.**
+
+13. **Frontend uses one unified download flow** — every request goes through `_fetchWithProgress` against `buildDownloadURL()`. While waiting for the first byte, the frontend rotates through phase-specific status messages every 20s ("Downloading from Drive…", "Cropping to region…", "Building the ZIP archive…") so the user knows what stage the server is at; once bytes start flowing, it switches to "Downloading — X MB / Y MB (Z%)". Don't reintroduce per-case branching with divergent messages.
 
 ## Deployment
 
