@@ -4,15 +4,43 @@ Project context for AI agents working on this repo. Read this before touching co
 
 ## What this is
 
-A weather data download portal for Texas A&M Team Overbye research. Users browse and download weather datasets (ERA5, HRRR, NOAA/GFS) that live as files in Google Drive folders. The backend exposes a catalog/download API; the frontend is a static site.
+A weather data download portal for Texas A&M Team Overbye research. Users browse and download weather datasets (ERA5, HRRR, NOAA/GFS, plus 62 curated historical extreme-temperature events) that live as files in Google Drive folders. The backend exposes a catalog/download API; the frontend is a static site.
 
 - **Backend**: FastAPI (Python), deployed on Railway → `https://weather-data-gui.up.railway.app`
   (Railway service Root Directory MUST be `website/backend` or the build falls back to Railpack and fails — the Dockerfile is at `website/backend/Dockerfile`. The frontend's `window.API_BASE` in `website/frontend/index.html` must point at this URL.)
 - **Frontend**: Static HTML/JS/CSS, deployed on Cloudflare Pages → `https://weather-data-gui.pages.dev`
   (Pages project: Production branch `main`, Build output dir `website/frontend`, no build command. Auto-deploys on push.)
 - **Data**: Google Drive (service account, read-only)
-- **SDK**: `TeamOverbyeWeather` Python package on PyPI (in `package/`)
-- **Repo**: https://github.com/ChunSikPark/Weather_data_GUI
+- **SDK**: `TeamOverbyeWeather` on PyPI. `package/` here is a **working copy**;
+  the published source, docs and issues live in a separate repo.
+- **This repo** (site): https://github.com/ChunSikPark/Weather_data_GUI
+- **Package repo**: https://github.com/ChunSikPark/TeamOverbyeWeather
+- **Docs**: https://chunsikpark.github.io/TeamOverbyeWeather/ — built from the
+  package repo. This repo's Pages serves a redirect at the old URL, because
+  PyPI metadata is frozen per version and 0.4.0/0.4.1 still point there.
+
+### Releasing the package
+
+Edit under `package/`, then mirror into the package repo and cut the release
+from there (that repo is what PyPI and the docs build from):
+
+```bash
+cp package/pyproject.toml package/README.md            package-repo/
+cp -r package/TeamOverbyeWeather/.                     package-repo/TeamOverbyeWeather/
+cd package-repo && python -m build && python -m twine check dist/* && python -m twine upload dist/*
+```
+
+Bump `version` in `pyproject.toml` **and** `__version__` in `__init__.py`
+together, plus `release` in `docs/conf.py`. A PyPI version can never be reused,
+so run `twine check` and confirm `[project.urls]` before uploading.
+
+`package-repo/` is gitignored here — it is a separate git repository.
+
+**Two traps when users report breakage after a release:** `pip install X` does
+nothing if X is already installed (needs `--upgrade`), and Python will not
+replace an already-imported module (needs a kernel restart). Together they
+surface as `AttributeError` on new methods. `demo.ipynb` guards against this with
+a version check right after import.
 
 ## Architecture
 
@@ -57,6 +85,12 @@ server-side. `client.list(source, type)` gives valid date keys; `client.sources(
 `website/backend/download.py`, `_API_KEYS`/`_TYPES` in `package/.../registry.py`, and
 `TYPE_DEFS`/`getApiSourceKey()` in `website/frontend/main.js`. If a source works in the
 portal but not the SDK, that mismatch is the cause.
+
+**Extreme events break the Step 1/2/3 mould.** Step 2 lists ISO zones built from
+the catalog (not `TYPE_DEFS`), Step 3 is `renderEventGallery()` rather than a date
+picker, and the step headings are retitled by `applyStepHeadings()`. Gallery
+videos must stay `preload="none"` — otherwise opening a zone fetches every
+animation in it (1.7 GB across the set) before anyone presses play.
 
 ## Critical: Google Drive folder IDs
 
