@@ -24,6 +24,7 @@ _SOURCE_LOOKUP: dict[str, dict[str, str]] = {
     "noaa_forecast_archive": {"catalog_key": "noaa_forecast_archive", "list_key": "cycles"},
     "era5_na": {"catalog_key": "era5_na", "list_key": "quarters"},
     "era5_tx": {"catalog_key": "era5_tx", "list_key": "quarters"},
+    "extreme_events": {"catalog_key": "extreme_events", "list_key": "keys"},
 }
 
 # Default download filename pattern per source.
@@ -39,6 +40,8 @@ _FILENAME_PATTERNS: dict[str, str] = {
     "noaa_forecast_archive": "Forecast_NorthAmerica_Run{key}.pww",
     "era5_na": "ERA5_NorthAmerica_{key}.pww",
     "era5_tx": "ERA5_Texas_{key}.pww",
+    # The event key already carries date, title and zone.
+    "extreme_events": "{key}.pww",
 }
 
 
@@ -217,6 +220,21 @@ def stream_drive_file(file_id: str):
         buf.truncate()
         if data:
             yield data
+
+
+def fetch_drive_range(file_id: str, start: int, end: int) -> bytes:
+    """Return bytes ``start..end`` (inclusive) of a Drive file.
+
+    Used to serve HTTP range requests for the event animations so a browser
+    fetches only the part of the video it actually plays, instead of the whole
+    file on every seek.  The caller is responsible for bounding the span — the
+    whole range is held in memory.
+    """
+    import catalog as _cat
+    service = _cat.DriveClient()._get_service()
+    request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
+    request.headers["Range"] = f"bytes={start}-{end}"
+    return request.execute()
 
 
 def _fetch_drive_to_tmp(file_id: str) -> str:

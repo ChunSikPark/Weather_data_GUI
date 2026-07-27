@@ -39,6 +39,9 @@ _DEFAULT_FOLDERS = {
     "era5_archive": "1PD_y38k6x8HjDR8Wv-15NsZ6pdZ9pVPz",
     "era5_quarterly": "12U8PNHHGIxCy8_GRzsF2KxZ4GneMWy6h",
     "era5_history_zip": "1O8VjwFKXCJ3DR56_UEep-rXyb7OHNGMZ",
+    # Curated historical extreme-temperature events, one subfolder per ISO zone.
+    # Each event ships a .pww and a matching .mp4 animation.
+    "extreme_events": "1qDXPh1yu5XpzJPWFKBDDawdpcktXhA7V",
 }
 
 _DEFAULT_CREDENTIALS_PATH = "/app/credentials/service_account.json"
@@ -68,6 +71,17 @@ _RE_HRRR_HOURLY_MONTH = re.compile(r"^(\d{4})-(\d{2})_hourly_CONUS\.[A-Za-z0-9.]
 _RE_HRRR_HISTORY_MONTH = re.compile(r"^CONUS_?(\d{4})_(\d{2})\.[A-Za-z0-9.]+$", re.IGNORECASE)
 _RE_HRRR_HISTORY_DAY = re.compile(r"^CONUS_(\d{4})_(\d{2})_(\d{2})\.[A-Za-z0-9.]+$", re.IGNORECASE)
 _RE_NOAA = re.compile(r"Forecast_NorthAmerica_Run(\d{4}-\d{2}-\d{2})T(\d{2})Z\.pww$", re.IGNORECASE)
+# Extreme events: "YYYY-MM-DD_Event_Title_ZONE.pww" (+ matching .mp4), and
+# "coverage_ZONE.png".  Zone names themselves contain underscores
+# (NYISO_ISONE), so the zone is matched against the known list longest-first
+# rather than by splitting on the last underscore.
+_EXTREME_ZONES = (
+    "NYISO_ISONE", "NorthAmerica", "Northwest", "Southeast", "Southwest",
+    "CAISO", "MISO", "PJM", "SPP", "Texas",
+)
+_RE_EXTREME = re.compile(r"^(\d{4}-\d{2}-\d{2})_(.+)\.(pww|mp4)$", re.IGNORECASE)
+_RE_EXTREME_COVERAGE = re.compile(r"^coverage_(.+)\.png$", re.IGNORECASE)
+
 _RE_ERA5_QUARTER = re.compile(r"(\d{4})[^0-9]{0,4}Q(\d)", re.IGNORECASE)
 _RE_ERA5_TX = re.compile(r"(texas|_tx[_\.\b]|northtexas|tx_)", re.IGNORECASE)
 _RE_ERA5_NA = re.compile(r"(northamerica|north_america|_na[_\.\b])", re.IGNORECASE)
@@ -204,6 +218,10 @@ def _empty_catalog() -> dict[str, dict[str, Any]]:
         "noaa_forecast_archive": {"cycles": [], "file_ids": {}},
         "era5_na": {"quarters": [], "file_ids": {}},
         "era5_tx": {"quarters": [], "file_ids": {}},
+        "extreme_events": {
+            "keys": [], "zones": [], "events": {},
+            "coverage": {}, "file_ids": {}, "video_ids": {},
+        },
     }
 
 
@@ -396,6 +414,82 @@ def _build_era5(client: DriveClient) -> dict[str, dict[str, Any]]:
     return {"era5_na": pack(na), "era5_tx": pack(tx)}
 
 
+def _split_extreme_zone(stem: str) -> tuple[str, str]:
+    """Split "Event_Title_ZONE" into ``(title, zone)``.
+
+    Zone names contain underscores, so the known zones are tried longest-first.
+    Files with no zone suffix (the 1899 continent-wide event) fall back to
+    NorthAmerica.
+    """
+    for zone in sorted(_EXTREME_ZONES, key=len, reverse=True):
+        if stem.endswith("_" + zone):
+            return stem[: -len(zone) - 1], zone
+        if stem == zone:
+            return stem, zone
+    return stem, "NorthAmerica"
+
+
+def _build_extreme(client: DriveClient) -> dict[str, Any]:
+    """Curated historical extreme-temperature events, grouped by ISO zone.
+
+    Each event contributes a ``.pww`` (the data) and usually a matching ``.mp4``
+    animation; the two are paired on the event key.  ``coverage_ZONE.png`` files
+    describe each zone's extent.  The same event can appear in several zone
+    subfolders (the 1899 outbreak does), so entries are deduplicated by key.
+    """
+    folder = _folder_id("GDRIVE_EXTREME_FOLDER_ID", "extreme_events")
+
+    pww: dict[str, dict[str, Any]] = {}
+    mp4: dict[str, dict[str, Any]] = {}
+    meta: dict[str, dict[str, str]] = {}
+    coverage: dict[str, dict[str, Any]] = {}
+
+    for f in client.list_files(folder):
+        name = f.get("name") or ""
+
+        cov = _RE_EXTREME_COVERAGE.match(name)
+        if cov:
+            coverage.setdefault(cov.group(1), _entry(f))
+            continue
+
+        m = _RE_EXTREME.match(name)
+        if not m:
+            continue
+        date, stem, ext = m.group(1), m.group(2), m.group(3).lower()
+        title, zone = _split_extreme_zone(stem)
+        key = f"{date}_{stem}"
+
+        if ext == "pww":
+            pww.setdefault(key, _entry(f))
+        else:
+            mp4.setdefault(key, _entry(f))
+        meta.setdefault(key, {
+            "key": key,
+            "date": date,
+            "title": title.replace("_", " ").strip(),
+            "zone": zone,
+        })
+
+    # Only events with actual data are listed; a stray .mp4 is not an event.
+    keys = sorted(pww.keys(), key=lambda k: (meta[k]["date"], k), reverse=True)
+
+    events: dict[str, list[dict[str, Any]]] = {}
+    for k in keys:
+        info = dict(meta[k])
+        info["has_video"] = k in mp4
+        events.setdefault(info["zone"], []).append(info)
+
+    zones = sorted(events.keys())
+    return {
+        "keys": keys,
+        "zones": zones,
+        "events": events,
+        "coverage": coverage,
+        "file_ids": {k: pww[k] for k in keys},
+        "video_ids": {k: mp4[k] for k in keys if k in mp4},
+    }
+
+
 def build_catalog() -> dict[str, Any]:
     """Build the full catalog by listing every relevant Drive folder."""
     client = DriveClient()
@@ -435,6 +529,11 @@ def build_catalog() -> dict[str, Any]:
         catalog["era5_tx"] = era5["era5_tx"]
     except Exception as exc:  # pragma: no cover - defensive
         print(f"[catalog] era5 failed: {exc}", file=sys.stderr)
+
+    try:
+        catalog["extreme_events"] = _build_extreme(client)
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"[catalog] extreme_events failed: {exc}", file=sys.stderr)
 
     return catalog
 

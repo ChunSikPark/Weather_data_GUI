@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import sys
 import tempfile
 import zipfile
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
@@ -255,6 +256,111 @@ async def download(
                 "Content-Length": str(zip_size),
             },
         )
+
+
+_VIDEO_CHUNK = 4 * 1024 * 1024   # cap per range response so RAM stays bounded
+
+
+def _extreme_section(catalog_data: dict) -> dict:
+    section = catalog_data.get("extreme_events")
+    if not isinstance(section, dict):
+        raise HTTPException(status_code=404, detail="No extreme-event catalog")
+    return section
+
+
+@app.get("/api/extreme/video")
+async def extreme_video(
+    request: Request,
+    key: str = Query(..., description="Event key, e.g. 2021-02-14_Winter_Storm_Uri_Texas"),
+):
+    """Stream an event animation, honouring HTTP range requests.
+
+    A browser seeking in a <video> sends Range headers; serving them means it
+    fetches only what it plays rather than the whole file each time. Each
+    response is capped at _VIDEO_CHUNK, and the browser asks for more as needed.
+    """
+    loop = asyncio.get_running_loop()
+    catalog_data = await loop.run_in_executor(None, catalog_module.get_catalog)
+    entry = _extreme_section(catalog_data).get("video_ids", {}).get(key)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"No animation for {key}")
+    file_id = entry.get("id")
+
+    size = await loop.run_in_executor(None, download_module.get_drive_file_size, file_id)
+    common = {
+        "Accept-Ranges": "bytes",
+        "Content-Disposition": f'inline; filename="{key}.mp4"',
+        "Cache-Control": "public, max-age=86400",
+    }
+
+    range_header = request.headers.get("range")
+    if not range_header or not size:
+        await _single_gate.acquire("video")
+
+        async def _full():
+            try:
+                async for chunk in iterate_in_threadpool(
+                    download_module.stream_drive_file(file_id)
+                ):
+                    yield chunk
+            finally:
+                _single_gate.release()
+
+        headers = dict(common)
+        if size:
+            headers["Content-Length"] = str(size)
+        return StreamingResponse(_full(), media_type="video/mp4", headers=headers)
+
+    m = re.match(r"bytes=(\d*)-(\d*)", range_header.strip())
+    if not m:
+        raise HTTPException(status_code=416, detail="Malformed Range header")
+    start = int(m.group(1)) if m.group(1) else 0
+    end = int(m.group(2)) if m.group(2) else size - 1
+    if start >= size:
+        raise HTTPException(
+            status_code=416, detail="Range start beyond end of file",
+            headers={"Content-Range": f"bytes */{size}"},
+        )
+    end = min(end, size - 1, start + _VIDEO_CHUNK - 1)
+
+    async with _single_gate.slot("video range"):
+        data = await loop.run_in_executor(
+            None, download_module.fetch_drive_range, file_id, start, end
+        )
+
+    return Response(
+        content=data,
+        status_code=206,
+        media_type="video/mp4",
+        headers={
+            **common,
+            "Content-Range": f"bytes {start}-{end}/{size}",
+            "Content-Length": str(len(data)),
+        },
+    )
+
+
+@app.get("/api/extreme/coverage")
+async def extreme_coverage(
+    zone: str = Query(..., description="ISO zone name, e.g. Texas"),
+):
+    """Return the coverage map PNG for a zone."""
+    loop = asyncio.get_running_loop()
+    catalog_data = await loop.run_in_executor(None, catalog_module.get_catalog)
+    entry = _extreme_section(catalog_data).get("coverage", {}).get(zone)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"No coverage map for {zone}")
+
+    async with _single_gate.slot("coverage"):
+        chunks = await loop.run_in_executor(
+            None, lambda: b"".join(download_module.stream_drive_file(entry["id"]))
+        )
+
+    return Response(
+        content=chunks,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @app.get("/api/regions")
