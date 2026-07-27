@@ -18,6 +18,8 @@ No authentication is required.
 | GET | `/api/download` | download whole files |
 | GET | `/api/regions` | states and ISO zones with bounding boxes |
 | GET | `/api/download/region` | download cropped by region and/or time |
+| GET | `/api/extreme/video` | event animation (supports range requests) |
+| GET | `/api/extreme/coverage` | zone coverage map PNG |
 | GET | `/api/debug/folders` | which Drive folders are in use |
 | GET | `/api/debug/folder` | raw filenames in a folder |
 
@@ -81,6 +83,40 @@ curl -OJ "https://weather-data-gui.up.railway.app/api/download/region\
 
 Times are UTC and both bounds are inclusive. Either may be omitted to leave that
 side open.
+
+## `/api/extreme/video`
+
+| Parameter | Required | Description |
+|---|---|---|
+| `key` | yes | event key, e.g. `2021-02-14_Winter_Storm_Uri_Texas` |
+
+Returns `video/mp4`. **Honours HTTP range requests**, replying `206 Partial
+Content` with a `Content-Range` header, so a player fetches only what it needs:
+
+```bash
+curl -H "Range: bytes=0-1048575" \
+  "https://weather-data-gui.up.railway.app/api/extreme/video\
+?key=2021-02-14_Winter_Storm_Uri_Texas" -o part.mp4
+```
+
+```text
+HTTP/1.1 206 Partial Content
+Accept-Ranges: bytes
+Content-Range: bytes 0-1048575/26188969
+Content-Type: video/mp4
+```
+
+Each response is capped at 4 MB regardless of the range asked for; request more
+to continue. A request with no `Range` header returns the whole file with `200`.
+A malformed or past-the-end range returns `416`.
+
+## `/api/extreme/coverage`
+
+| Parameter | Required | Description |
+|---|---|---|
+| `zone` | yes | ISO zone name, e.g. `Texas` |
+
+Returns `image/png`. Both extreme endpoints are cached for a day.
 
 ## `/api/regions`
 

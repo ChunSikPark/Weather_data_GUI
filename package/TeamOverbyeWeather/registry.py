@@ -19,6 +19,8 @@ _API_KEYS: dict[str, tuple[str, str]] = {
     "noaa_forecast":               ("cycles",   "Forecast_NorthAmerica_Run{key}.pww"),
     "noaa_forecast_recent":        ("cycles",   "Forecast_NorthAmerica_Run{key}.pww"),
     "noaa_forecast_archive":       ("cycles",   "Forecast_NorthAmerica_Run{key}.pww"),
+    # The event key already carries date, title and zone.
+    "extreme_events":              ("keys",     "{key}.pww"),
 }
 
 # (source, type) -> api_key.  ``None`` is the default type for that source.
@@ -45,6 +47,10 @@ _TYPES: dict[str, dict[str | None, str]] = {
         "recent":         "noaa_forecast_recent",
         "forecast":       "noaa_forecast_recent",
         "archive":        "noaa_forecast_archive",
+    },
+    "extreme": {
+        None:             "extreme_events",
+        "events":         "extreme_events",
     },
 }
 

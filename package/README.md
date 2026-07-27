@@ -74,6 +74,25 @@ Times are UTC and both bounds are inclusive. `datetime` objects work too.
 | `era5` | `historical`, `texas` | `YYYY-Qn` |
 | `hrrr` | `current`, `archive` (15-min), `hourly_current`, `hourly_archive`, `forecast` | `YYYY-MM-DD`, `YYYY-MM`, `YYYY-MM-DDTHHZ` |
 | `noaa` | `recent`, `archive` | `YYYY-MM-DDTHHZ` |
+| `extreme` | `events` | `YYYY-MM-DD_Title_Zone` |
+
+## Extreme temperature events
+
+62 curated historical events (1899–2023) — the three hottest and three coldest
+per ISO zone, plus notable scenarios like ERCOT's 2011 rolling outages. Each
+comes with an animation.
+
+```python
+client.extreme.zones()                       # ISO zones with events
+client.extreme.events("Texas")               # events in a zone, newest first
+client.extreme.find("uri")                   # search by title
+
+event = client.extreme.find("uri")[0]
+client.extreme.download(event["key"], region_ids=["TX"], region_layer="states",
+                        time_start="2021-02-15T00:00", dest="./data")
+client.extreme.video(event["key"], dest="./data")     # the .mp4 animation
+client.extreme.coverage("Texas", dest="./data")       # zone coverage map
+```
 
 Always take date keys from `client.list(source, type)` — formats differ per
 source, and NOAA `recent` / `archive` are separate folders rather than a date

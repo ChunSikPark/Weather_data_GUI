@@ -71,6 +71,15 @@ These IDs are **hardcoded directly in `_build_noaa()`** because Railway has stal
 | HRRR history hourly (archive, monthly) | `1jkkzUCtxVoKZ9MLfSCV2rLH761Jd3Qou` | `YYYY-MM_hourly_CONUS.zip` |
 | NOAA recent | `1kAOe-dGHByzZHijHGo8rmL7x4KY6OMav` | `Forecast_NorthAmerica_RunYYYY-MM-DDTHHZ.pww` |
 | NOAA archive | `1TTa-bDV88sSf4strSW649UHPRddMHJtr` | same as above |
+| Extreme events | `1qDXPh1yu5XpzJPWFKBDDawdpcktXhA7V` | per-zone subfolders; `YYYY-MM-DD_Title_ZONE.pww` + `.mp4`, `coverage_ZONE.png` |
+
+**Extreme events**: 62 curated historical events (1899–2023), the 3 hottest + 3
+coldest per ISO zone plus notable scenarios. Zone names contain underscores
+(`NYISO_ISONE`), so `_split_extreme_zone()` matches against a known zone list
+longest-first — splitting on the last underscore yields nonsense zones like
+`Wave_Southeast`. The 1899 event has no zone suffix and is duplicated across 5
+subfolders; it dedupes by key to `NorthAmerica`. 11 events span multiple zones
+and may carry dates a day apart per zone (the storm's arrival time there).
 
 The service account email from `service_account.json`'s `client_email` field MUST be granted Viewer access on every folder above.
 

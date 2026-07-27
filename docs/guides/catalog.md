@@ -42,6 +42,16 @@ furthest — as of writing, to 2014.
 | `recent` (default) | main folder | `YYYY-MM-DDTHHZ` |
 | `archive` | archive folder | `YYYY-MM-DDTHHZ` |
 
+### Extreme — curated historical events
+
+| `type` | Coverage | Key |
+|---|---|---|
+| `events` (default) | 62 events, 1899–2023, by ISO zone | `YYYY-MM-DD_Title_Zone` |
+
+Named historical extremes — the three hottest and three coldest per ISO zone,
+plus notable scenarios — each with an animation. These are browsed rather than
+sliced by date; see {doc}`extreme-events`.
+
 :::{warning}
 `recent` and `archive` are **separate folders**, not a date split. A cycle in one
 will not appear in the other, and "recent" does not necessarily mean

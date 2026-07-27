@@ -57,6 +57,7 @@ guides/catalog
 guides/downloading
 guides/regions
 guides/time
+guides/extreme-events
 guides/pww-files
 guides/troubleshooting
 ```

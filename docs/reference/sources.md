@@ -59,3 +59,15 @@ The wrappers use the older `region_ids` + `region_layer` pair; `download()` uses
    :members:
    :member-order: bysource
 ```
+
+## Extreme events
+
+Unlike the others, this namespace is not a legacy wrapper — event browsing,
+animations and coverage maps have no equivalent on `download()`. See
+{doc}`../guides/extreme-events`.
+
+```{eval-rst}
+.. autoclass:: TeamOverbyeWeather.sources.extreme.ExtremeClient
+   :members:
+   :member-order: bysource
+```

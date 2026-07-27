@@ -44,11 +44,13 @@ class WeatherClient:
 
         # Back-compat namespaces (thin wrappers over download()).
         from .sources.era5 import ERA5Client
+        from .sources.extreme import ExtremeClient
         from .sources.hrrr import HRRRClient
         from .sources.noaa import NOAAClient
         self.era5 = ERA5Client(self)
         self.hrrr = HRRRClient(self)
         self.noaa = NOAAClient(self)
+        self.extreme = ExtremeClient(self)
 
     # ------------------------------------------------------------------
     # Discovery
