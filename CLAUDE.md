@@ -7,9 +7,9 @@ Project context for AI agents working on this repo. Read this before touching co
 A weather data download portal for Texas A&M Team Overbye research. Users browse and download weather datasets (ERA5, HRRR, NOAA/GFS) that live as files in Google Drive folders. The backend exposes a catalog/download API; the frontend is a static site.
 
 - **Backend**: FastAPI (Python), deployed on Railway → `https://weather-data-gui.up.railway.app`
-  (Railway service Root Directory MUST be `backend` or the build falls back to Railpack and fails — the Dockerfile is at `backend/Dockerfile`. The frontend's `window.API_BASE` in `frontend/index.html` must point at this URL.)
+  (Railway service Root Directory MUST be `website/backend` or the build falls back to Railpack and fails — the Dockerfile is at `website/backend/Dockerfile`. The frontend's `window.API_BASE` in `website/frontend/index.html` must point at this URL.)
 - **Frontend**: Static HTML/JS/CSS, deployed on Cloudflare Pages → `https://weather-data-gui.pages.dev`
-  (Pages project: Production branch `main`, Build output dir `frontend`, no build command. Auto-deploys on push.)
+  (Pages project: Production branch `main`, Build output dir `website/frontend`, no build command. Auto-deploys on push.)
 - **Data**: Google Drive (service account, read-only)
 - **SDK**: `TeamOverbyeWeather` Python package on PyPI (in `package/`)
 - **Repo**: https://github.com/ChunSikPark/Weather_data_GUI
@@ -17,12 +17,12 @@ A weather data download portal for Texas A&M Team Overbye research. Users browse
 ## Architecture
 
 ```
-frontend/ (Cloudflare Pages)
+website/frontend/ (Cloudflare Pages)
   ├ index.html       Step 1/2/3 picker UI + region filter panel
   ├ main.js          State, API calls, render functions
   └ styles.css       "Scientific Dark" aesthetic (Bencium-inspired)
 
-backend/ (Railway, Docker)
+website/backend/ (Railway, Docker)
   ├ main.py          FastAPI app, endpoints
   ├ catalog.py       Drive scanning, regex matching, 30-min cache
   ├ download.py      ZIP bundling, source key lookup, fetch_and_crop()
@@ -35,12 +35,15 @@ package/TeamOverbyeWeather/  Python SDK (pip install TeamOverbyeWeather)
   ├ registry.py      (source, type) → API key map; mirrors _SOURCE_LOOKUP + TYPE_DEFS
   ├ localcrop.py     client-side crop fallback for 413s (handles nested zips)
   ├ errors.py        WeatherAPIError / RegionTooLargeError / ServerBusyError
-  ├ pww_io.py        Copy of backend/pww_io.py for local crop
+  ├ pww_io.py        Copy of website/backend/pww_io.py for local crop
   └ sources/         hrrr.py, noaa.py, era5.py — thin back-compat wrappers
 
-docs/               Sphinx docs → GitHub Pages via .github/workflows/docs.yml
-                    Live at https://chunsikpark.github.io/Weather_data_GUI/
-                    (.readthedocs.yaml is also present as an alternative host)
+docs-redirect/      Static redirect; the old docs URL forwards to the new one
+
+The Sphinx docs and the published package now live in their own repository:
+github.com/ChunSikPark/TeamOverbyeWeather, served at
+https://chunsikpark.github.io/TeamOverbyeWeather/. `package/` here is the
+working copy; releases are cut from the package repo.
 ```
 
 ## SDK: one call does everything
@@ -51,8 +54,8 @@ server-side. `client.list(source, type)` gives valid date keys; `client.sources(
 `client.types(s)` / `client.region_ids(layer)` are the discovery surface.
 
 **Three files must stay in sync** when adding a source: `_SOURCE_LOOKUP` in
-`backend/download.py`, `_API_KEYS`/`_TYPES` in `package/.../registry.py`, and
-`TYPE_DEFS`/`getApiSourceKey()` in `frontend/main.js`. If a source works in the
+`website/backend/download.py`, `_API_KEYS`/`_TYPES` in `package/.../registry.py`, and
+`TYPE_DEFS`/`getApiSourceKey()` in `website/frontend/main.js`. If a source works in the
 portal but not the SDK, that mismatch is the cause.
 
 ## Critical: Google Drive folder IDs
@@ -153,8 +156,8 @@ Returns 400 if both/neither of `region_ids`/`bbox` are given. Returns 413 with `
 
 ## Region crop system
 
-- **`backend/regions.py`**: 51-state bbox dict (hardcoded, keyed by 2-letter postal code) + ISO zones loaded from `D:\Research_Projects\Inputs\Shape_Files\ISO_REGIONS\ISO_Regions_cleaned.shp` via `pyshp`. Alaska clipped to `(71.4, -180.0, 51.2, -129.9)` to avoid antimeridian union issues.
-- **`backend/pww_io.py`**: `read_pww(bytes)`, `read_pww_file(path)` (mmap, low RAM), `crop_to_bbox(header, stations, arr, bbox_tuple)`, `write_pww(header, stations, arr)`. Longitude axis descends (east→west), 255 = NaN sentinel. Always `.copy()` after slicing. File shape is detected by content, not source name: ERA5, NOAA, and **hourly** HRRR history are bare `.pww`; HRRR forecast is a zip with one `.pww`; HRRR history **15-min daily** is a zip with four quarter `.pww` (stitched via `concat_time`). NOAA/HRRR are now VERSION 2; ERA5 still VERSION 1 — `pww_io` reads both. The crop pipeline streams Drive files to `/tmp` and mmaps them to keep peak RAM ~64 MB.
+- **`website/backend/regions.py`**: 51-state bbox dict (hardcoded, keyed by 2-letter postal code) + ISO zones loaded from `D:\Research_Projects\Inputs\Shape_Files\ISO_REGIONS\ISO_Regions_cleaned.shp` via `pyshp`. Alaska clipped to `(71.4, -180.0, 51.2, -129.9)` to avoid antimeridian union issues.
+- **`website/backend/pww_io.py`**: `read_pww(bytes)`, `read_pww_file(path)` (mmap, low RAM), `crop_to_bbox(header, stations, arr, bbox_tuple)`, `write_pww(header, stations, arr)`. Longitude axis descends (east→west), 255 = NaN sentinel. Always `.copy()` after slicing. File shape is detected by content, not source name: ERA5, NOAA, and **hourly** HRRR history are bare `.pww`; HRRR forecast is a zip with one `.pww`; HRRR history **15-min daily** is a zip with four quarter `.pww` (stitched via `concat_time`). NOAA/HRRR are now VERSION 2; ERA5 still VERSION 1 — `pww_io` reads both. The crop pipeline streams Drive files to `/tmp` and mmaps them to keep peak RAM ~64 MB.
 - **ISO shapefile**: `.prj` is checked at startup. If it's a projected CRS (starts with `PROJCS[`) or lacks WGS84 datum, the module logs to stderr and `iso` returns `[]` — ISO tab shows empty list, no crash.
 - **Memory guard**: `asyncio.Semaphore(1)` on `/api/download/region` prevents concurrent crop ops on Railway's 512 MB container. CONUS-scale HRRR archive requests are blocked at 413 — use `client.hrrr.download_region()` which crops locally.
 - **SDK `download_region()`**: available on `HRRRClient`, `NOAAClient`, `ERA5Client`. HRRR archive + large bbox triggers `_local_crop()` (downloads per-month, unzips, crops with `pww_io` locally). `package/TeamOverbyeWeather/pww_io.py` is a copy of the backend module.
@@ -213,7 +216,7 @@ Returns 400 if both/neither of `region_ids`/`bbox` are given. Returns 413 with `
 ## Deployment
 
 ### Frontend (Cloudflare Pages)
-Auto-deploys on push to `main`. Build output dir = `frontend`. No build step.
+Auto-deploys on push to `main`. Build output dir = `website/frontend`. No build step.
 
 ### Backend — two options
 
@@ -221,7 +224,7 @@ Auto-deploys on push to `main`. Build output dir = `frontend`. No build step.
 
 Railway auto-deploys on push to `main` (~90s). URL: `https://weather-data-gui.up.railway.app`.
 Verify with `curl <url>/api/health`, then `curl <url>/api/debug/folders`, then `curl <url>/api/catalog/refresh` (cache is 30 min).
-**Service Root Directory MUST be `backend`** (Settings → Source) — the Dockerfile lives at `backend/Dockerfile`; if root dir is blank Railway analyzes the repo root, finds no Dockerfile, falls back to Railpack, and dies with "Script start.sh not found". Set the builder to Dockerfile if it doesn't auto-switch.
+**Service Root Directory MUST be `website/backend`** (Settings → Source) — the Dockerfile lives at `website/backend/Dockerfile`; if root dir is blank Railway analyzes the repo root, finds no Dockerfile, falls back to Railpack, and dies with "Script start.sh not found". Set the builder to Dockerfile if it doesn't auto-switch.
 Env vars needed: `GDRIVE_CREDENTIALS_JSON_CONTENT` (full service-account JSON as a string), `CORS_ORIGINS=https://weather-data-gui.pages.dev`. Optional concurrency knobs: `REGION_CONCURRENCY`, `BUNDLE_CONCURRENCY`, `SINGLE_CONCURRENCY`, `MAX_DOWNLOAD_QUEUE` (see Painful lesson #10).
 Note: now on the **8 GB** plan (was 512 MB). The `_Gate` queues are tuned for 8 GB; dial the env knobs if load changes. Do NOT set any `GDRIVE_*_FOLDER_ID` vars — Railway's are stale; folder IDs are hardcoded/defaulted in `catalog.py`.
 
@@ -250,7 +253,7 @@ cloudflared tunnel run --url http://localhost:8000 weather-backend
 docker compose restart backend
 ```
 
-After the tunnel is running, update the frontend's `API_BASE` in `frontend/main.js` to the tunnel URL and push.
+After the tunnel is running, update the frontend's `API_BASE` in `website/frontend/main.js` to the tunnel URL and push.
 
 **Verify after start:**
 ```bash

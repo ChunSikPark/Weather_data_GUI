@@ -45,3 +45,9 @@ data/
 
 # Demo notebook output
 demo_data/
+
+# Standalone package repo, pushed separately
+package-repo/
+
+# Sphinx build output (docs live in the package repo now)
+docs/

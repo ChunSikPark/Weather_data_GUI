@@ -8,7 +8,7 @@ call.
 | | |
 |---|---|
 | **Web portal** | https://weather-data-gui.pages.dev |
-| **Documentation** | https://chunsikpark.github.io/Weather_data_GUI/ |
+| **Documentation** | https://chunsikpark.github.io/TeamOverbyeWeather/ |
 | **Python package** | https://pypi.org/project/TeamOverbyeWeather/ |
 
 ```bash
@@ -29,10 +29,13 @@ Texas six-hour NOAA slice is 240 KB instead of the 120 MB full file.
 
 ## Found a problem? Have a question?
 
-**[Open an issue](https://github.com/ChunSikPark/Weather_data_GUI/issues/new/choose)**
-— bug reports and data questions both welcome. For bugs, please include your
-package version (`TeamOverbyeWeather.__version__`), the code you ran, and the
-full error.
+For the **Python package**, open an issue on its own repository:
+**[TeamOverbyeWeather/issues](https://github.com/ChunSikPark/TeamOverbyeWeather/issues/new/choose)**
+— include your version (`TeamOverbyeWeather.__version__`), the code you ran, and
+the full traceback.
+
+For the **web portal or the API**, open an issue
+[here](https://github.com/ChunSikPark/Weather_data_GUI/issues/new/choose).
 
 Two things worth checking first:
 
@@ -51,19 +54,24 @@ Two things worth checking first:
 
 ```
 weather-website/
-  frontend/          HTML + CSS + JS  →  Cloudflare Pages
-  backend/           FastAPI          →  Railway / Render (Docker)
-  package/           Python SDK       →  PyPI (pip install TeamOverbyeWeather)
+  website/
+    frontend/        HTML + CSS + JS  →  Cloudflare Pages
+    backend/         FastAPI          →  Railway (Docker)
+  package/           Python SDK, working copy
+  docs-redirect/     forwards the old docs URL to the new one
+
+The published package and its documentation live in their own repository:
+https://github.com/ChunSikPark/TeamOverbyeWeather
 ```
 
 ```
 Browser
   │  static assets
   ▼
-Cloudflare Pages (frontend/)
+Cloudflare Pages (website/frontend/)
   │  /api/* requests (proxied via Cloudflare)
   ▼
-Railway / Render (backend/ Docker container)
+Railway (website/backend/ Docker container)
   │  PyDrive2 service account
   ▼
 Google Drive  ←── weather_auto pipelines upload here
@@ -82,7 +90,7 @@ notify_bot/config/alert_state.json  ──── mounted into backend container
 ### Backend
 
 ```bash
-cd backend
+cd website/backend
 python -m venv .venv && source .venv/bin/activate  # or .venv\Scripts\activate on Windows
 pip install -r requirements.txt
 
@@ -104,7 +112,7 @@ API available at `http://localhost:8000`:
 The frontend is plain HTML/CSS/JS — no build step required.
 
 ```bash
-cd frontend
+cd website/frontend
 python -m http.server 3000
 # Open http://localhost:3000
 ```
@@ -122,7 +130,7 @@ By default the frontend points to `http://localhost:8000` for API calls. To poin
 ### Backend — Railway (Recommended)
 
 1. Create a new project at [railway.app](https://railway.app)
-2. Connect your GitHub repo, select the `backend/` folder as root (or use monorepo config)
+2. Connect your GitHub repo, select the `website/backend/` folder as root (or use monorepo config)
 3. Railway auto-detects the Dockerfile and builds it
 4. Add environment variables in Railway dashboard (copy from `.env.example`)
 5. For `GDRIVE_CREDENTIALS_JSON`: upload the service account JSON as a Railway Volume or embed its content as an env var:
@@ -139,7 +147,7 @@ By default the frontend points to `http://localhost:8000` for API calls. To poin
 
 **Alternative: Docker on existing host**
 ```bash
-cd backend
+cd website/backend
 docker compose up -d --build
 ```
 The `docker-compose.yml` mounts `alert_state.json` from `ALERT_STATE_HOST_PATH`.
@@ -152,13 +160,13 @@ The `docker-compose.yml` mounts `alert_state.json` from `ALERT_STATE_HOST_PATH`.
 4. Build settings:
    - **Framework preset**: None
    - **Build command**: *(leave empty)*
-   - **Build output directory**: `frontend`
+   - **Build output directory**: `website/frontend`
 5. Add environment variable (optional):
    - `API_BASE` = your Railway/Render backend URL
 6. Deploy → Cloudflare gives you a `*.pages.dev` URL
 
 **Point frontend at backend:**
-Edit `frontend/index.html` — find this line near the top and set your backend URL:
+Edit `website/frontend/index.html` — find this line near the top and set your backend URL:
 ```html
 <script>window.API_BASE = 'https://your-backend.railway.app'</script>
 ```
@@ -184,7 +192,7 @@ This lets you set `CORS_ORIGINS` to just your domain instead of `*`.
 The backend reads `alert_state.json` written by `notify_bot`. On the Docker host running both services:
 
 ```bash
-# In backend/docker-compose.yml, set:
+# In website/docker-compose.yml, set:
 ALERT_STATE_HOST_PATH=/path/to/weather_auto/notify_bot/config/alert_state.json
 ```
 
@@ -214,20 +222,20 @@ from TeamOverbyeWeather import WeatherClient
 
 client = WeatherClient()  # defaults to production API
 
-# List available ERA5 quarters
-quarters = client.era5.list_quarters(region="north_america")
+# What is available?
+client.sources()                       # ['era5', 'hrrr', 'noaa', 'extreme']
+client.list("hrrr", "hourly_current")  # date keys, newest first
 
-# Download ERA5 Q1 2025
-client.era5.download(quarters=["2025-Q1"], region="north_america", dest="./data/")
+# Download, cropped to a region and a time window in one call
+client.download("hrrr", type="hourly_current", dates="2026-07-21",
+                region="TX", time_start="2026-07-21T06:00",
+                time_end="2026-07-21T18:00", dest="./data")
 
-# Latest NOAA forecast
-client.noaa.download_latest(dest="./data/")
-
-# Pipeline health
-print(client.status())
+# Curated historical extreme-temperature events
+client.extreme.events("Texas")
 ```
 
-See `package/README.md` for full SDK documentation.
+Full documentation: https://chunsikpark.github.io/TeamOverbyeWeather/
 
 ---
 

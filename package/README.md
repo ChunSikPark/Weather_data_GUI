@@ -111,9 +111,41 @@ arr.shape        # (time, variable, latitude, longitude)
 
 ## Documentation
 
-Full guides and API reference: **https://chunsikpark.github.io/Weather_data_GUI/**
+Full guides and API reference: **https://chunsikpark.github.io/TeamOverbyeWeather/**
 
 Point-and-click alternative: **https://weather-data-gui.pages.dev**
+
+`demo.ipynb` in this repository is a runnable walkthrough of everything above.
+
+## Problems or questions
+
+**[Open an issue](https://github.com/ChunSikPark/TeamOverbyeWeather/issues/new/choose)**
+— bugs and data questions are both welcome. For bugs, include your version
+(`TeamOverbyeWeather.__version__`), the code you ran, and the full traceback.
+
+Two things worth checking first:
+
+- `AttributeError: 'WeatherClient' object has no attribute ...` almost always
+  means an old version. Run `pip install --upgrade TeamOverbyeWeather`, then
+  **restart your kernel** — Python will not replace a module that is already
+  imported, so upgrading mid-session appears to do nothing.
+- A source showing no data may genuinely be empty. Check
+  `client.list(source, type)`, and try `client.catalog(refresh=True)` — the
+  catalog is cached for 30 minutes.
+
+## Development
+
+```bash
+git clone https://github.com/ChunSikPark/TeamOverbyeWeather.git
+cd TeamOverbyeWeather
+pip install -e .
+```
+
+Point the client at a local backend with
+`WeatherClient(base_url="http://localhost:8000")`.
+
+The backend and web portal live in a separate repository; this one holds the
+Python package only.
 
 ## License
 
